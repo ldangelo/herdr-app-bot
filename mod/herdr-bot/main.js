@@ -40,6 +40,12 @@ const fetchText = async (url) => {
   return response.text();
 };
 
+/**
+ * Whether the host program is there and runnable. Not readTextFile: the host is a binary, which that refuses (it reads
+ * UTF-8 text up to 1 MiB), while a text shim from an older install would pass.
+ */
+const isRunnable = async (path) => (await exec("test", ["-x", path])).code === 0;
+
 /** curl may be fetching tens of megabytes; everything else is quick. */
 const run = (command, args) => exec(command, args, { timeout: command === "curl" ? 600000 : 60000 });
 
@@ -55,7 +61,7 @@ async function readEndpoint(botHome) {
 
 async function startHost(botHome) {
   const shimPath = `${botHome}/bin/herdr-bot`;
-  if ((await readTextFile(shimPath)) == null) throw new HostMissingError(`herdr-bot is not installed: ${shimPath} is missing`);
+  if (!(await isRunnable(shimPath))) throw new HostMissingError(`herdr-bot is not installed: ${shimPath} is missing`);
   const result = await hc(hostLaunchArgs({ botHome, shimPath }));
   if (result.code !== 0 && !isHostAlreadyStarting(result)) throw new Error(`could not start the herdr-bot host: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
 }
@@ -183,7 +189,7 @@ export default class HerdrBot extends View {
         cx.notify();
         this.retryRequested = false;
         // (It also stops waiting if the host appears some other way: another copy of this mod installed it.)
-        while (this.alive && !this.retryRequested && !this.installRequested && (await readTextFile(`${botHome}/bin/herdr-bot`)) == null) await cx.sleep(300);
+        while (this.alive && !this.retryRequested && !this.installRequested && !(await isRunnable(`${botHome}/bin/herdr-bot`))) await cx.sleep(300);
         if (this.alive && this.installRequested && this.installPlan.ok) {
           this.installRequested = false;
           this.phase = "installing";

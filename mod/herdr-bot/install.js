@@ -15,10 +15,25 @@ export class HostUnavailableError extends Error {
   }
 }
 
-/** The manifest/asset key for this machine ("darwin-arm64"), from herdr's platform word and the CPU architecture. */
+/** Operating-system names as Node, Rust (herdr-app's `os` module) and herdr itself spell them, as manifest keys use them. */
+export function normalizePlatform(platform) {
+  const word = String(platform).toLowerCase();
+  if (word === "macos" || word === "darwin") return "darwin";
+  if (word === "windows" || word === "win32") return "windows";
+  return word;
+}
+
+/** CPU names likewise: herdr-app reports Rust's "aarch64"/"x86_64", Node says "arm64"/"x64". */
+export function normalizeArch(arch) {
+  const word = String(arch).toLowerCase();
+  if (word === "aarch64" || word === "arm64") return "arm64";
+  if (word === "x86_64" || word === "amd64" || word === "x64") return "x64";
+  return word;
+}
+
+/** The manifest/asset key for this machine ("darwin-arm64"). */
 export function platformKey(platform, arch) {
-  const os = platform === "macos" || platform === "darwin" ? "darwin" : platform;
-  return `${os}-${arch}`;
+  return `${normalizePlatform(platform)}-${normalizeArch(arch)}`;
 }
 
 /** Only https, or plain http to this machine (a local test server), may serve a program we will run. */
@@ -57,7 +72,7 @@ export function describeSize(bytes) {
  */
 export async function planInstall({ source, platform, arch, fetchText }) {
   if (!isAllowedSource(source)) return { ok: false, reason: `${source} is not an https address` };
-  if (platform === "windows") return { ok: false, reason: "installing the host is not supported on Windows yet" };
+  if (normalizePlatform(platform) === "windows") return { ok: false, reason: "installing the host is not supported on Windows yet" };
   const key = platformKey(platform, arch);
   try {
     const manifest = JSON.parse(await fetchText(`${source.replace(/\/+$/, "")}/manifest.json`));
@@ -79,7 +94,7 @@ export async function installHost({ source, botHome, platform, arch, fetchText, 
   if (!isAllowedSource(source)) throw new HostUnavailableError(`${source} is not an https address`);
   const base = source.replace(/\/+$/, "");
   const key = platformKey(platform, arch);
-  if (platform === "windows") throw new HostUnavailableError("installing the host is not supported on Windows yet");
+  if (normalizePlatform(platform) === "windows") throw new HostUnavailableError("installing the host is not supported on Windows yet");
 
   onStep("manifest");
   let manifest;

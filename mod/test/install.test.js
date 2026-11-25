@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_SOURCE, HostUnavailableError, describeSize, installHost, isAllowedSource, pickAsset, planInstall, platformKey } from "../herdr-bot/install.js";
+import { DEFAULT_SOURCE, HostUnavailableError, describeSize, installHost, isAllowedSource, normalizeArch, normalizePlatform, pickAsset, planInstall, platformKey } from "../herdr-bot/install.js";
 
 const SHA = "a".repeat(64);
 const manifest = (assets = { "darwin-arm64": { file: "herdr-bot-darwin-arm64", sha256: SHA, size: 88_000_000 } }) => JSON.stringify({ version: "1.3.0", assets });
@@ -104,4 +104,23 @@ test("planInstall says what would be fetched without fetching the program, or wh
   assert.match((await planInstall({ source: "http://example.com", platform: "macos", arch: "arm64", fetchText })).reason, /not an https address/);
   assert.match((await planInstall({ source: "https://example.test/r", platform: "windows", arch: "x64", fetchText })).reason, /Windows/);
   assert.match((await planInstall({ source: "https://example.test/r", platform: "macos", arch: "arm64", fetchText: async () => { throw new Error("offline"); } })).reason, /could not reach https:\/\/example.test\/r \(offline\)/);
+});
+
+test("platform and CPU names are normalised however Node, Rust or herdr spell them", () => {
+  // herdr-app's `os` module is Rust-flavoured: this is what a real mod sees on an Apple-silicon Mac.
+  assert.equal(platformKey("macos", "aarch64"), "darwin-arm64");
+  assert.equal(platformKey("darwin", "arm64"), "darwin-arm64");
+  assert.equal(platformKey("linux", "x86_64"), "linux-x64");
+  assert.equal(platformKey("linux", "amd64"), "linux-x64");
+  assert.equal(platformKey("win32", "x64"), "windows-x64");
+  assert.equal(platformKey("Windows", "X86_64"), "windows-x64");
+  assert.equal(normalizeArch("riscv64"), "riscv64", "unknown names pass through to be reported");
+  assert.equal(normalizePlatform("freebsd"), "freebsd");
+});
+
+test("installing and planning work with herdr-app's own spelling of the platform", async () => {
+  const { deps } = harness();
+  assert.equal((await installHost({ ...deps, platform: "macos", arch: "aarch64" })).path, "/h/bin/herdr-bot");
+  assert.equal((await planInstall({ source: "https://example.test/r", platform: "macos", arch: "aarch64", fetchText: async () => manifest() })).ok, true);
+  await assert.rejects(installHost({ ...deps, platform: "win32", arch: "x86_64" }), /Windows/);
 });
