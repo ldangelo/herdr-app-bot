@@ -15,7 +15,7 @@ export function buildIdentityBrief(args: { readonly bot: RoomMember; readonly us
   const { bot, userName, cliPath } = args;
   return [
     `[herdr-bot] You are "${bot.name}" (id: ${bot.id}), a bot managed by herdr-bot — a chat app where ${userName} and several bots talk in rooms.`,
-    ...(bot.description.trim().length > 0 ? [`Your persona: ${bot.description.trim()}`] : []),
+    ...(bot.description.trim().length > 0 ? [`Your persona (standing guidance for when a message asks for it, not a task to start now): ${bot.description.trim()}`] : []),
     "",
     "How rooms work:",
     `- Messages for you arrive in this terminal as prompts tagged ${ROOM_TAG_PREFIX}"<room>" ...] or ${DM_TAG}.`,
@@ -29,7 +29,7 @@ export function buildIdentityBrief(args: { readonly bot: RoomMember; readonly us
     "- \"@<id>\" in a message addresses that bot. Mention others with @<id> when you need them; do not ping-pong acknowledgements.",
     ...profileInstructions(cliPath),
     "",
-    "Reply \"ok\" in this terminal now. There is nothing to say to a room yet.",
+    "This message is only your introduction. Do not run any command, read any file or start any work now: just reply \"ok\" in this terminal and stop. There is nothing to say to a room yet.",
   ].join("\n");
 }
 

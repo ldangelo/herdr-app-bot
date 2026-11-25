@@ -120,3 +120,9 @@ test("a room turn prompt tells the bot the room's working directory, and says no
   for (const none of [undefined, null, "", "   "]) assert.ok(!build(none).includes("Room working directory"), JSON.stringify(none));
   assert.ok(!buildDmTurnPrompt({ bot: member, chatId: "atlas", userName: "ray", newMessages: [], cliPath: "/c/herdr-bot" }).includes("working directory"), "a DM has no room directory");
 });
+
+test("the identity brief presents the persona as standing guidance and asks for nothing but an ok", () => {
+  const brief = buildIdentityBrief({ bot: { id: "pm", name: "PM", title: "", description: "Use the create-prd skill to write a PRD." } as never, userName: "ray", cliPath: "/opt/herdr-bot" });
+  assert.match(brief, /Your persona \(standing guidance for when a message asks for it, not a task to start now\): Use the create-prd skill to write a PRD\./);
+  assert.match(brief, /Do not run any command, read any file or start any work now: just reply "ok" in this terminal and stop\./);
+});

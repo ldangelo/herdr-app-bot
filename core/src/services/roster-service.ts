@@ -665,7 +665,20 @@ export class RosterService {
     // The bot may have been deleted while its brief was still in flight (createBot no longer awaits
     // this) -- do not resurrect a notice into a chat whose transcript/state was already evicted.
     if (!result.ok && this.#deps.profiles.get(profile.id) != null) {
-      this.#deps.onNotice?.(profile.id, `${profile.id} did not confirm its room briefing yet (${result.detail}). It will still receive turn prompts.`);
+      // An agent that went off to do work of its own instead of just answering would stay busy, and the room would skip
+      // it every turn: stop what it is doing (Escape is harmless at an idle prompt).
+      const interrupted = await this.#interrupt(profile.id);
+      this.#deps.onNotice?.(profile.id, `${profile.id} did not confirm its room briefing yet (${result.detail}).${interrupted ? " It was interrupted so it can take turns." : ""} It will still receive turn prompts.`);
+    }
+  }
+
+  async #interrupt(botId: string): Promise<boolean> {
+    try {
+      await this.#deps.cli.agentSendKeys(botId, ["esc"]);
+      return true;
+    } catch (error) {
+      log("roster", `could not interrupt ${botId} after an unconfirmed briefing`, error instanceof Error ? error.message : String(error));
+      return false;
     }
   }
 
