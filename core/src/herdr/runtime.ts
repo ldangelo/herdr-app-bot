@@ -1,15 +1,15 @@
 import type { HostConfig } from "../config.ts";
 import { createHerdrCli, type HerdrCli } from "./cli.ts";
 import { ensureHerdrSession, spawnHerdrSessionServer } from "./session.ts";
-import { subscribeHerdrEvents } from "./socket.ts";
+import { createHcCli, createHcEventSubscriber } from "./hc-cli.ts";
+import { subscribeHerdrEvents, type SubscribeEvents } from "./socket.ts";
+
+export type { SubscribeEvents };
 
 /** Which agent runtime the host drives: the terminal `herdr` (0.9+) or herdr-core's `hc` (herdr-app). */
 export type RuntimeKind = "herdr" | "hc";
 
 export const RUNTIME_KINDS: readonly RuntimeKind[] = ["herdr", "hc"];
-
-/** Same contract as `subscribeHerdrEvents`: an event is only a hint to refresh, never state. */
-export type SubscribeEvents = typeof subscribeHerdrEvents;
 
 /**
  * Everything the host needs from the thing that actually runs the agents. `cli` is the command
@@ -41,11 +41,22 @@ export function createHerdrRuntime(config: HostConfig, env: NodeJS.ProcessEnv = 
   };
 }
 
+/** herdr-core's `hc` (the runtime behind herdr-app). It needs no session of its own: `hc server status` starts the core. */
+export function createHcRuntime(config: HostConfig, env: NodeJS.ProcessEnv = process.env, cli: HerdrCli = createHcCli(config.hcBin, env, { cliPath: config.cliPath })): AgentRuntime {
+  return {
+    kind: "hc",
+    cli,
+    subscribe: createHcEventSubscriber(config.hcBin, env),
+    endpoint: "hc:events",
+    ensureSession: async () => (await cli.sessionList())[0]?.socketPath ?? "hc",
+  };
+}
+
 export function createAgentRuntime(config: HostConfig, env: NodeJS.ProcessEnv = process.env, cli?: HerdrCli): AgentRuntime {
   switch (config.runtime) {
     case "herdr":
       return createHerdrRuntime(config, env, cli);
     case "hc":
-      throw new Error("the hc runtime is not implemented yet");
+      return createHcRuntime(config, env, cli);
   }
 }

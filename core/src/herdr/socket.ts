@@ -102,3 +102,6 @@ export function subscribeHerdrEvents(socketPath: string, subscriptions: readonly
     },
   };
 }
+
+/** Same contract as `subscribeHerdrEvents`: an event is only a hint to refresh, never state. */
+export type SubscribeEvents = typeof subscribeHerdrEvents;

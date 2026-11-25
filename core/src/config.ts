@@ -13,6 +13,8 @@ export interface HostConfig {
   /** `HERDR_BOT_RUNTIME`: `herdr` (default, terminal herdr 0.9+) or `hc` (herdr-core, for herdr-app). */
   readonly runtime: RuntimeKind;
   readonly herdrBin: string;
+  /** `HERDR_BOT_HC_BIN`: the `hc` binary the hc runtime drives. */
+  readonly hcBin: string;
   /** Named herdr session every herdr call targets (`herdr --session <name> …`); `default` is the main session. */
   readonly herdrSession: string;
   readonly herdrSocketPath: string;
@@ -62,6 +64,7 @@ export function resolveConfig(env: NodeJS.ProcessEnv = process.env): HostConfig 
     home,
     runtime: runtimeKind(env.HERDR_BOT_RUNTIME),
     herdrBin: nonEmpty(env.HERDR_BIN_PATH) ?? "herdr",
+    hcBin: nonEmpty(env.HERDR_BOT_HC_BIN) ?? "hc",
     herdrSession,
     // Deliberately NOT `HERDR_SOCKET_PATH`: herdr injects that into every pane it manages, pointing at
     // the session the *terminal* lives in (usually `default`). An app launched from such a terminal
