@@ -6,6 +6,18 @@ All notable changes to herdr-bot are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-25
+
+### Added
+
+- Oh My Pi and Pi bots can be given a model. The host lists them from `pi --list-models` and `omp models ls` (as
+  `provider/model`) and launches with `--model`. A model is optional for these two: leaving it out runs the model set up
+  in the CLI. The desktop app's picker does not offer it yet.
+
+### Fixed
+
+- The herdr-app mod no longer fails when Pi or Oh My Pi is chosen in New bot.
+
 ## [1.4.0] - 2026-11-25
 
 ### Added

@@ -18,6 +18,9 @@ export interface AgentLaunchOptions {
   readonly reasoningEffort: ReasoningEffort | null;
 }
 
+/** These can pick a model, but have their own configured one: leaving it out runs that. */
+export const MODEL_OPTIONAL: readonly string[] = ["pi", "omp"];
+
 export interface ProviderLaunchCapabilities {
   readonly model: boolean;
   readonly reasoning: boolean;
@@ -27,7 +30,7 @@ export interface ProviderLaunchCapabilities {
  * the effort tier (`gemini-4-argon-high`), so a second `--effort` pick could only contradict it. */
 export function providerLaunchCapabilities(kind: string): ProviderLaunchCapabilities {
   return {
-    model: ["claude", "codex", "grok", "gemini", "agy", "opencode"].includes(kind),
+    model: ["claude", "codex", "grok", "gemini", "agy", "opencode", "pi", "omp"].includes(kind),
     reasoning: ["claude", "codex", "grok"].includes(kind),
   };
 }
@@ -39,7 +42,7 @@ export function missingLaunchChoices(choice: { readonly kind?: string | null; re
   if (kind.length === 0) return ["provider"];
   const capabilities = providerLaunchCapabilities(kind);
   return [
-    ...(capabilities.model && (choice.model?.trim() ?? "").length === 0 ? ["model"] : []),
+    ...(capabilities.model && !MODEL_OPTIONAL.includes(kind) && (choice.model?.trim() ?? "").length === 0 ? ["model"] : []),
     ...(capabilities.reasoning && choice.reasoningEffort == null ? ["reasoningEffort"] : []),
   ];
 }
