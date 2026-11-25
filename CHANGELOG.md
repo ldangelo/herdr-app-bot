@@ -6,6 +6,11 @@ All notable changes to herdr-bot are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Oh My Pi (`omp`) and Pi (`pi`) as AI providers, in the desktop app and in the herdr-app mod. They run on the
+  model and thinking level configured in the CLI itself, so there is no model or reasoning choice for them.
+
 ## [1.3.0] - 2026-10-21
 
 ### Added

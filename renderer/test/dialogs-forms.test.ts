@@ -14,11 +14,21 @@ function botForm(patch: Partial<BotFormState> = {}): BotFormState {
 
 // ---- provider-catalog ----
 
-test("provider-catalog: exposes exactly the 5 curated providers", () => {
+test("provider-catalog: exposes exactly the 7 curated providers", () => {
   assert.deepEqual(
     PROVIDERS.map((p) => p.id),
-    ["claude", "codex", "grok", "agy", "opencode"],
+    ["claude", "codex", "grok", "agy", "opencode", "omp", "pi"],
   );
+});
+
+test("provider-catalog: Oh My Pi (omp) and Pi (pi) are selectable and take neither a model nor a reasoning level", () => {
+  assert.equal(findProvider("omp").label, "Oh My Pi");
+  assert.equal(findProvider("pi").label, "Pi");
+  for (const id of ["omp", "pi"]) {
+    assert.equal(isSelectableProvider(id), true, id);
+    assert.equal(providerSupportsModel(id), false, id);
+    assert.equal(providerSupportsReasoning(id), false, id);
+  }
 });
 
 test("provider-catalog: Antigravity CLI (agy) replaces Gemini CLI in the picker; gemini bots keep their own descriptor", () => {
@@ -29,7 +39,7 @@ test("provider-catalog: Antigravity CLI (agy) replaces Gemini CLI in the picker;
   assert.equal(providerSupportsReasoning("gemini"), false);
 });
 
-test("provider-catalog: model is meaningful for all 5, reasoning only for claude/codex/grok", () => {
+test("provider-catalog: model is meaningful for claude/codex/grok/agy/opencode, reasoning only for claude/codex/grok", () => {
   assert.equal(providerSupportsModel("claude"), true);
   assert.equal(providerSupportsModel("agy"), true);
   assert.equal(providerSupportsReasoning("claude"), true);

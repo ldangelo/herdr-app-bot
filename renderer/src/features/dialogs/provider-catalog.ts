@@ -1,9 +1,10 @@
 /**
  * The curated subset of the host's much larger `SUPPORTED_KINDS` enum this picker actually offers
- * (Claude Code, Codex, Grok CLI, Antigravity CLI, OpenCode -- 5 of the host's ~23 kinds), plus
+ * (Claude Code, Codex, Grok CLI, Antigravity CLI, OpenCode, Oh My Pi, Pi -- 7 of the host's ~23 kinds), plus
  * each provider's model/reasoning-effort capability flags: model selection is only meaningful for
  * `claude, codex, grok, agy, opencode`; reasoning-effort only for `claude, codex, grok` (an `agy` model id
- * already carries its effort tier, e.g. `gemini-4-argon-high`). Pure module
+ * already carries its effort tier, e.g. `gemini-4-argon-high`). `omp` (Oh My Pi) and `pi` take neither: they run on the
+ * model and thinking level configured in the CLI itself. Pure module
  * (no DOM/React/asset imports) so it is unit-testable directly; the icon asset itself is resolved by the
  * component layer (`ProviderSelect.tsx`) from `iconSlug`.
  */
@@ -27,6 +28,8 @@ export const PROVIDERS: readonly ProviderDescriptor[] = [
   { id: "grok", label: "Grok CLI", iconSlug: null, iconColor: null, supportsModel: true, supportsReasoning: true },
   { id: "agy", label: "Antigravity CLI", iconSlug: null, iconColor: null, supportsModel: true, supportsReasoning: false },
   { id: "opencode", label: "OpenCode", iconSlug: "opencode", iconColor: null, supportsModel: true, supportsReasoning: false },
+  { id: "omp", label: "Oh My Pi", iconSlug: null, iconColor: null, supportsModel: false, supportsReasoning: false },
+  { id: "pi", label: "Pi", iconSlug: null, iconColor: null, supportsModel: false, supportsReasoning: false },
 ];
 
 /** Providers no longer offered for new bots but still describing existing ones -- Gemini CLI was replaced

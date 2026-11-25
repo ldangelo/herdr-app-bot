@@ -8,6 +8,9 @@ export const PROVIDERS = [
   { id: "grok", label: "Grok CLI", supportsModel: true, supportsReasoning: true },
   { id: "agy", label: "Antigravity CLI", supportsModel: true, supportsReasoning: false },
   { id: "opencode", label: "OpenCode", supportsModel: true, supportsReasoning: false },
+  // These two run on the model and thinking level configured in the CLI itself: nothing to pick here.
+  { id: "omp", label: "Oh My Pi", supportsModel: false, supportsReasoning: false },
+  { id: "pi", label: "Pi", supportsModel: false, supportsReasoning: false },
 ];
 
 export const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
