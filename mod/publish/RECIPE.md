@@ -1,6 +1,6 @@
 # herdr-bot
 
->>>>>>> 4b762b8 (Mod: rooms, room folders and bot roles)
+A chat panel for your coding agents inside the Herdr window. Each agent (Claude Code, Codex, Grok, Antigravity, OpenCode, Oh My Pi, Pi, or any agent that reports its status) becomes a "bot" you can message. Bots can also message each other, and you can put several in a **room** to talk to them all in one conversation. You see who is working, who is waiting for you, and who is idle, and you can answer an agent's permission prompt with one click instead of switching to its terminal.
 
 ![herdr-bot](preview.png)
 
