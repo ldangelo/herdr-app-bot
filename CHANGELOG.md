@@ -6,6 +6,8 @@ All notable changes to herdr-bot are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-25
+
 ### Added
 
 - Oh My Pi (`omp`) and Pi (`pi`) as AI providers, in the desktop app and in the herdr-app mod. They run on the
