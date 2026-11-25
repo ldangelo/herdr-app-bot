@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SUPPORTED_KINDS, launchArgsFor, missingLaunchChoices, providerLaunchCapabilities } from "../src/bots/launch-args.ts";
+import { SUPPORTED_KINDS, isSupportedKind, launchArgsFor, missingLaunchChoices, providerLaunchCapabilities } from "../src/bots/launch-args.ts";
 
 const cli = "/Users/ray/.herdr-bot/bin/herdr-bot";
 
@@ -56,4 +56,15 @@ test("provider capabilities reject unsupported reasoning", () => {
     () => launchArgsFor("gemini", "ask", "/opt/herdr-bot", { model: null, reasoningEffort: "high" }),
     /gemini does not support reasoning effort/,
   );
+});
+
+test("pi and omp (Oh My Pi) are supported kinds that take neither a model nor a reasoning level, and launch with no extra flags", () => {
+  for (const kind of ["pi", "omp"]) {
+    assert.equal(isSupportedKind(kind), true, kind);
+    assert.deepEqual(providerLaunchCapabilities(kind), { model: false, reasoning: false }, kind);
+    assert.deepEqual(missingLaunchChoices({ kind }), [], `${kind} needs no model or effort chosen`);
+    for (const mode of ["ask", "auto"] as const) assert.deepEqual(launchArgsFor(kind, mode, cli), [], `${kind} ${mode}`);
+    assert.throws(() => launchArgsFor(kind, "ask", cli, { model: "some-model", reasoningEffort: null }), /does not support model selection/);
+    assert.throws(() => launchArgsFor(kind, "ask", cli, { model: null, reasoningEffort: "high" }), /does not support reasoning effort/);
+  }
 });

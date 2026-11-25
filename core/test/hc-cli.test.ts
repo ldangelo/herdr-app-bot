@@ -66,6 +66,15 @@ test("codex is launched with --no-daemon", async () => {
   assert.deepEqual(launch.slice(-2), ["codex", "--no-daemon"]);
 });
 
+test("pi and omp are launched by their own command names", async () => {
+  for (const kind of ["pi", "omp"]) {
+    const { hc, cli } = setup({ cliDir: null });
+    await startBot(cli, "bot", kind);
+    const run = hc.calls.find((call) => call[0] === "run")!;
+    assert.deepEqual(run.slice(run.indexOf("--") + 1), [kind], kind);
+  }
+});
+
 test("agentStart without a bot CLI folder runs the agent directly", async () => {
   const { hc, cli } = setup({ cliDir: null });
   await startBot(cli, "reviewer", "claude");
