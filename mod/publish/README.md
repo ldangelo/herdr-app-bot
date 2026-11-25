@@ -4,6 +4,8 @@ A chat panel for your coding agents, as a mod for the [Herdr](https://herdr.dev)
 
 ![herdr-bot](preview.png)
 
+*A scripted demo agent in a layout of my own: a chat with an approval card waiting, and the bot list docked beside it.*
+
 ## Install
 
 Tell your Herdr agent:

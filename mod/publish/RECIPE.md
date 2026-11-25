@@ -4,6 +4,8 @@ A chat panel for your coding agents inside the Herdr window. Each agent (Claude 
 
 ![herdr-bot](preview.png)
 
+*The preview shows two copies of the panel in a layout of the person's own, played by a scripted demo agent: on the left one opened on a chat with an approval card waiting, on the right the bot list.*
+
 **This mod runs programs, reaches the network and downloads an executable.** Read *Watch out* before adding it.
 
 ## What you see
@@ -78,7 +80,7 @@ Rows are ordered: needs you, working, done, idle, then offline or unknown; withi
 - **`readTextFile` refuses binaries** (UTF-8 only, 1 MiB at most), so test for the host with `exec("test", ["-x", path])`, not by reading it.
 - **Do not name the `init` parameter `props`:** it shadows the imported `props()`.
 - **A mod that fails to load stays broken until Herdr restarts**, even after you fix it. `herdr-app check` does not run async code, so it will not catch most runtime mistakes.
-- **A new mod is not docked into the shipped layouts.** Open it with `herdr-app do mod.open '{"name":"herdr-bot"}'` or as a tab: `herdr-app do tab.new '{"mod":"herdr-bot"}'`.
+- **Shipped layouts are not changed**, so there the mod appears only when you open it: `herdr-app do mod.open '{"name":"herdr-bot"}'` or as a tab: `herdr-app do tab.new '{"mod":"herdr-bot"}'`. In a layout of your own (for example after `layout.clone`), Herdr docks it on the right, 360 px wide, the first time it sees the folder.
 - **Bots started here appear in this panel, not in Herdr's Agents list**, because they run without a pane. They are visible in `hc ls`.
 - **What has been tried:** every screen, the live updates, an approval card answered, the host download, an update, and the host stopping with the app were run in a real Herdr window. Typing into fields, clicking buttons and the folder picker were exercised through the host's API rather than by hand.
 - **Not built yet:** rooms (the host supports them), search, markdown rendering, multi-choice and free-text approval cards. Some system notices from the host are in Korean.
