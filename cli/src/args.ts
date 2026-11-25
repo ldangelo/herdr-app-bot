@@ -1,10 +1,11 @@
 import { REASONING_EFFORTS, missingLaunchChoices, type ReasoningEffort } from "../../core/src/bots/launch-args.ts";
+import { RUNTIME_KINDS, type RuntimeKind } from "../../core/src/herdr/runtime.ts";
 
 export type CliOutput = "json" | "transcript";
 
 export type CliCommand =
   | { readonly kind: "control"; readonly method: string; readonly params: Record<string, unknown>; readonly output: CliOutput }
-  | { readonly kind: "serve"; readonly ws: boolean; readonly exitWhenIdleSeconds: number | null }
+  | { readonly kind: "serve"; readonly ws: boolean; readonly exitWhenIdleSeconds: number | null; readonly runtime: RuntimeKind | null }
   | { readonly kind: "install-shim" };
 
 export type CliParse = CliCommand | { readonly error: string };
@@ -90,13 +91,15 @@ function nonEmptyEnv(value: string | undefined): string | null {
 }
 
 /**
- * `serve [--ws] [--exit-when-idle <seconds>]`: `--ws` also serves the app API on a loopback WebSocket (for a
+ * `serve [--ws] [--exit-when-idle <seconds>] [--runtime herdr|hc]`: `--ws` also serves the app API on a loopback WebSocket (for a
  * herdr-app mod) and publishes where in `<home>/ws.json`; `--exit-when-idle` (implies `--ws`) makes the host
- * quit once no client has been connected for that long, so it stops with the app that started it.
+ * quit once no client has been connected for that long, so it stops with the app that started it. `--runtime`
+ * overrides HERDR_BOT_RUNTIME (a host started from a mod has no way to set the environment).
  */
 function parseServe(argv: readonly string[]): CliParse {
   let ws = false;
   let exitWhenIdleSeconds: number | null = null;
+  let runtime: RuntimeKind | null = null;
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]!;
     if (token === "--ws") ws = true;
@@ -106,9 +109,14 @@ function parseServe(argv: readonly string[]): CliParse {
       exitWhenIdleSeconds = value;
       ws = true;
       index += 1;
+    } else if (token === "--runtime") {
+      const value = RUNTIME_KINDS.find((kind) => kind === argv[index + 1]);
+      if (value == null) return { error: `serve --runtime must be one of ${RUNTIME_KINDS.join(", ")}` };
+      runtime = value;
+      index += 1;
     } else return { error: `serve: unknown option "${token}"` };
   }
-  return { kind: "serve", ws, exitWhenIdleSeconds };
+  return { kind: "serve", ws, exitWhenIdleSeconds, runtime };
 }
 
 export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): CliParse {

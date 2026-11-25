@@ -3,12 +3,22 @@
   "version": "1.3.0",
   "private": true,
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/speardragon/herdr-bot.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/speardragon/herdr-bot.git"
+  },
   "type": "module",
-  "engines": { "node": ">=24.0.0" },
-  "workspaces": ["core", "cli", "renderer", "desktop"],
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "workspaces": [
+    "core",
+    "cli",
+    "renderer",
+    "desktop"
+  ],
   "scripts": {
-    "test": "node --test \"core/test/**/*.test.ts\" \"cli/test/**/*.test.ts\" \"desktop/test/**/*.test.ts\" \"renderer/test/**/*.test.ts\"",
+    "test": "node --test \"core/test/**/*.test.ts\" \"cli/test/**/*.test.ts\" \"desktop/test/**/*.test.ts\" \"renderer/test/**/*.test.ts\" \"mod/test/**/*.test.js\"",
     "typecheck": "tsc -p core/tsconfig.json && tsc -p cli/tsconfig.json && tsc -p desktop/tsconfig.json --noEmit && tsc -p renderer/tsconfig.json",
     "check": "npm run typecheck && npm test",
     "renderer:typecheck": "tsc -p renderer/tsconfig.json",
@@ -19,7 +29,8 @@
     "desktop:dev": "npm run build -w @herdr-bot/desktop && HERDR_BOT_RENDERER_URL=http://localhost:5173 HERDR_BOT_DEV=1 npm run start -w @herdr-bot/desktop",
     "desktop:dev:fake": "npm run build -w @herdr-bot/desktop && node scripts/dev-fake-herdr.mjs",
     "desktop:package": "npm run desktop:build && npx electron-builder --config electron-builder.yml --project desktop",
-    "desktop:package:dir": "npm run desktop:build && npx electron-builder --config electron-builder.yml --project desktop --dir"
+    "desktop:package:dir": "npm run desktop:build && npx electron-builder --config electron-builder.yml --project desktop --dir",
+    "mod:check": "herdr-app check mod/herdr-bot"
   },
   "devDependencies": {
     "@types/node": "^24",

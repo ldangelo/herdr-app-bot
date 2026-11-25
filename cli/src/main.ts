@@ -32,8 +32,8 @@ async function runControl(command: Extract<CliCommand, { kind: "control" }>): Pr
   else process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
-async function serve(options: { readonly ws: boolean; readonly exitWhenIdleSeconds: number | null }): Promise<void> {
-  const config = resolveConfig();
+async function serve(options: { readonly ws: boolean; readonly exitWhenIdleSeconds: number | null; readonly runtime: string | null }): Promise<void> {
+  const config = resolveConfig(options.runtime == null ? process.env : { ...process.env, HERDR_BOT_RUNTIME: options.runtime });
   const host = createHost(config);
   await host.start();
   installShim(config.home, process.execPath, fileURLToPath(import.meta.url));

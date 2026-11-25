@@ -68,7 +68,7 @@ test("bot create requires an explicit provider, plus a model and reasoning effor
 });
 
 test("serve and install-shim are local commands; unknown commands error", () => {
-  assert.deepEqual(parseCliArgs(["serve"], env), { kind: "serve", ws: false, exitWhenIdleSeconds: null });
+  assert.deepEqual(parseCliArgs(["serve"], env), { kind: "serve", ws: false, exitWhenIdleSeconds: null, runtime: null });
   assert.deepEqual(parseCliArgs(["install-shim"], env), { kind: "install-shim" });
   assert.deepEqual(parseCliArgs([], env), { error: "usage: herdr-bot <say|message|pass|read|rooms|whoami|send|bot|room|status|serve|install-shim> ...\nexample: herdr-bot bot create reviewer --cwd /work/repo --kind codex --model gpt-5.4 --reasoning high" });
   assert.deepEqual(parseCliArgs(["dance"], env), { error: 'unknown command "dance"' });
@@ -83,11 +83,13 @@ test("the calling bot is identified by HERDR_PANE_ID, or HC_TERMINAL_ID under he
 });
 
 test("serve takes --ws and --exit-when-idle, and rejects anything else", () => {
-  assert.deepEqual(parseCliArgs(["serve"], {}), { kind: "serve", ws: false, exitWhenIdleSeconds: null });
-  assert.deepEqual(parseCliArgs(["serve", "--ws"], {}), { kind: "serve", ws: true, exitWhenIdleSeconds: null });
-  assert.deepEqual(parseCliArgs(["serve", "--exit-when-idle", "30"], {}), { kind: "serve", ws: true, exitWhenIdleSeconds: 30 }, "idle exit implies the socket");
-  assert.deepEqual(parseCliArgs(["serve", "--ws", "--exit-when-idle", "0.5"], {}), { kind: "serve", ws: true, exitWhenIdleSeconds: 0.5 });
-  for (const bad of [["--exit-when-idle"], ["--exit-when-idle", "soon"], ["--exit-when-idle", "0"], ["--exit-when-idle", "-3"], ["--nope"]]) {
+  assert.deepEqual(parseCliArgs(["serve"], {}), { kind: "serve", ws: false, exitWhenIdleSeconds: null, runtime: null });
+  assert.deepEqual(parseCliArgs(["serve", "--ws"], {}), { kind: "serve", ws: true, exitWhenIdleSeconds: null, runtime: null });
+  assert.deepEqual(parseCliArgs(["serve", "--exit-when-idle", "30"], {}), { kind: "serve", ws: true, exitWhenIdleSeconds: 30, runtime: null }, "idle exit implies the socket");
+  assert.deepEqual(parseCliArgs(["serve", "--ws", "--exit-when-idle", "0.5"], {}), { kind: "serve", ws: true, exitWhenIdleSeconds: 0.5, runtime: null });
+  assert.deepEqual(parseCliArgs(["serve", "--runtime", "hc", "--exit-when-idle", "30"], {}), { kind: "serve", ws: true, exitWhenIdleSeconds: 30, runtime: "hc" });
+  assert.deepEqual(parseCliArgs(["serve", "--runtime", "herdr"], {}), { kind: "serve", ws: false, exitWhenIdleSeconds: null, runtime: "herdr" });
+  for (const bad of [["--runtime"], ["--runtime", "tmux"], ["--exit-when-idle"], ["--exit-when-idle", "soon"], ["--exit-when-idle", "0"], ["--exit-when-idle", "-3"], ["--nope"]]) {
     assert.ok("error" in parseCliArgs(["serve", ...bad], {}), bad.join(" "));
   }
 });
