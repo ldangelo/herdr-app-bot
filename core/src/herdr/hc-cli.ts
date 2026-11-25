@@ -42,6 +42,8 @@ const APP_TO_KIND: Readonly<Record<string, string>> = { "claude-code": "claude" 
 export interface HcCliOptions {
   /** Folder holding the `herdr-bot` CLI; prepended to PATH inside every bot terminal (hc terminals get the login PATH, not the host's). */
   readonly cliDir?: string | null;
+  /** The bot home exported as HERDR_BOT_HOME inside every bot terminal, so `herdr-bot say` finds this host even when the home is not ~/.herdr-bot. */
+  readonly botHome?: string | null;
   /** `herdr-app` binary used for `agentFocus`; absent = focusing is unsupported. */
   readonly runApp?: ((args: readonly string[]) => Promise<void>) | null;
   /** Per-kind launch commands, over the built-in table (tests substitute a fake agent here). */
@@ -264,10 +266,11 @@ export function createHcCliFromRunner(runner: RawHerdrRunner, options: HcCliOpti
       const location = pending.get(args.paneId);
       if (location == null) throw new HerdrError("pane_not_found", `no pending pane ${args.paneId}`);
       const dir = options.cliDir ?? null;
+      const botHome = options.botHome ?? null;
       // Runs in the terminal's own (login) environment, so $PATH there is expanded by sh, not by us.
       const launch = dir == null
         ? [...kindArgv(args.kind), ...args.agentArgs]
-        : ["sh", "-c", 'dir=$1; shift; PATH="$dir:$PATH"; export PATH; exec "$@"', "herdr-bot", dir, ...kindArgv(args.kind), ...args.agentArgs];
+        : ["sh", "-c", 'dir=$1; home=$2; shift 2; PATH="$dir:$PATH"; export PATH; if [ -n "$home" ]; then HERDR_BOT_HOME="$home"; export HERDR_BOT_HOME; fi; exec "$@"', "herdr-bot", dir, botHome ?? "", ...kindArgv(args.kind), ...args.agentArgs];
       const started = await runJson([
         "run", "--bg", "--json", "--name", args.name, "--cwd", location.cwd,
         "--label", `${MANAGED_LABEL}=1`, "--label", `${ID_LABEL}=${args.name}`,
@@ -375,6 +378,7 @@ export function createHcCli(binPath: string, env: NodeJS.ProcessEnv = process.en
   const appBin = config.appBin ?? "herdr-app";
   return createHcCliFromRunner(createExecHcRunner(binPath, env), {
     cliDir: dirname(config.cliPath),
+    botHome: dirname(dirname(config.cliPath)),
     ...(config.kindCommands == null ? {} : { kindCommands: config.kindCommands }),
     runApp: (args) => new Promise((resolve, reject) => {
       execFile(appBin, [...args], { env, timeout: 10_000 }, (error) => (error == null ? resolve() : reject(new HerdrError("hc_app_failed", error.message))));

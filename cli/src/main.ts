@@ -9,7 +9,20 @@ import { log } from "../../core/src/log.ts";
 import { IdleExit } from "../../core/src/ws/idle-exit.ts";
 import { removeWsEndpoint, startAppApiWsServer, writeWsEndpoint } from "../../core/src/ws/server.ts";
 import { parseCliArgs, type CliCommand } from "./args.ts";
-import { installShim } from "./shim.ts";
+import { isStandaloneBinary } from "./standalone.ts";
+import { installShim, installStandaloneShim } from "./shim.ts";
+
+/** Makes `<home>/bin/herdr-bot` work for the bots: a script that runs node on this file, or, for a compiled binary, itself. */
+function ensureShim(home: string): string {
+  if (!isStandaloneBinary(import.meta.url)) return installShim(home, process.execPath, fileURLToPath(import.meta.url));
+  try {
+    return installStandaloneShim(home, process.execPath);
+  } catch (error) {
+    // Something else already sits at <home>/bin/herdr-bot: leave it alone and carry on serving.
+    log("cli", error instanceof Error ? error.message : String(error));
+    return `${home}/bin/herdr-bot`;
+  }
+}
 
 function printTranscript(result: unknown): void {
   const entries = (result as { entries?: { author: string; text: string; timestampMs: number }[] }).entries ?? [];
@@ -36,7 +49,7 @@ async function serve(options: { readonly ws: boolean; readonly exitWhenIdleSecon
   const config = resolveConfig(options.runtime == null ? process.env : { ...process.env, HERDR_BOT_RUNTIME: options.runtime });
   const host = createHost(config);
   await host.start();
-  installShim(config.home, process.execPath, fileURLToPath(import.meta.url));
+  ensureShim(config.home);
 
   let api: ReturnType<typeof createAppApiServer> | null = null;
   let ws: Awaited<ReturnType<typeof startAppApiWsServer>> | null = null;
@@ -80,7 +93,7 @@ async function main(): Promise<void> {
   }
   if (parsed.kind === "serve") return serve(parsed);
   if (parsed.kind === "install-shim") {
-    const path = installShim(resolveConfig().home, process.execPath, fileURLToPath(import.meta.url));
+    const path = ensureShim(resolveConfig().home);
     process.stdout.write(`${path}\n`);
     return;
   }

@@ -13,7 +13,7 @@ const noSleep = async (): Promise<void> => undefined;
 
 function setup(options: Parameters<typeof createHcCliFromRunner>[1] = {}) {
   const hc = new FakeHc();
-  const cli = createHcCliFromRunner(hc.runner, { cliDir: "/home/me/.herdr-bot/bin", sleep: noSleep, ...options });
+  const cli = createHcCliFromRunner(hc.runner, { cliDir: "/home/me/.herdr-bot/bin", botHome: "/home/me/.herdr-bot", sleep: noSleep, ...options });
   return { hc, cli };
 }
 
@@ -35,11 +35,27 @@ test("agentStart runs the agent as a labelled, parentless, kept terminal named a
   // The agent is exec'd by a tiny sh wrapper so the bot CLI folder lands on the terminal's own PATH.
   const launch = run.slice(run.indexOf("--") + 1);
   assert.deepEqual(launch.slice(0, 2), ["sh", "-c"]);
-  assert.deepEqual(launch.slice(3), ["herdr-bot", "/home/me/.herdr-bot/bin", "claude", "--model", "opus"]);
+  assert.deepEqual(launch.slice(3), ["herdr-bot", "/home/me/.herdr-bot/bin", "/home/me/.herdr-bot", "claude", "--model", "opus"]);
+  assert.match(launch[2] ?? "", /HERDR_BOT_HOME="\$home"/, "the bot home reaches the agent, so its herdr-bot calls find this host");
   assert.equal(info.name, "reviewer");
   assert.equal(info.agent, "claude");
   assert.equal(info.agent_status, "idle");
   assert.equal(info.pane_id, hc.terminals[0]!.address);
+});
+
+test("the launch wrapper, run by a real sh, puts the CLI folder on PATH and exports the bot home", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { hc, cli } = setup({ cliDir: "/opt/bots/bin", botHome: "/data/my bots" });
+  await startBot(cli, "reviewer", "claude");
+  const run = hc.calls.find((call) => call[0] === "run")!;
+  const [sh, flag, script, ...rest] = run.slice(run.indexOf("--") + 1);
+  // Swap the agent for something that reports its environment.
+  const agentAt = rest.indexOf("claude");
+  const out = execFileSync(sh!, [flag!, script!, ...rest.slice(0, agentAt), "sh", "-c", 'echo "HOME=$HERDR_BOT_HOME"; echo "PATH=$PATH"'], { env: { PATH: "/usr/bin:/bin" }, encoding: "utf8" });
+  assert.match(out, /^HOME=\/data\/my bots$/m);
+  assert.match(out, /^PATH=\/opt\/bots\/bin:\/usr\/bin:\/bin$/m);
+  const noHome = execFileSync(sh!, [flag!, script!, "herdr-bot", "/opt/bots/bin", "", "sh", "-c", 'echo "HOME=[$HERDR_BOT_HOME]"'], { env: { PATH: "/usr/bin:/bin" }, encoding: "utf8" });
+  assert.match(noHome, /HOME=\[\]/, "no bot home given: nothing is exported");
 });
 
 test("codex is launched with --no-daemon", async () => {
