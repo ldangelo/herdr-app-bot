@@ -36,3 +36,10 @@ test("room store round-trips an optional creationRequestId", () => {
     temp.cleanup();
   }
 });
+
+test("projectRoomConfig keeps a room's directory, and rooms saved before rooms had one still load", () => {
+  const base = { id: "room-x", name: "X", createdAt: 1, updatedAt: 2 };
+  assert.equal(projectRoomConfig({ ...base, directory: "/work/shop" })?.directory, "/work/shop");
+  assert.equal("directory" in (projectRoomConfig(base) ?? {}), false);
+  for (const bad of ["", 7, null, {}]) assert.equal("directory" in (projectRoomConfig({ ...base, directory: bad }) ?? {}), false, JSON.stringify(bad));
+});

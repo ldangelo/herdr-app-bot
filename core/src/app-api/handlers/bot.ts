@@ -42,6 +42,7 @@ export async function createBot(host: Host, raw: unknown): Promise<{ readonly ch
     name: str(params, "name"),
     ...(optStr(params, "id") == null ? {} : { id: optStr(params, "id")! }),
     ...(optStr(params, "description") == null ? {} : { description: optStr(params, "description")! }),
+    ...(optStr(params, "title") == null ? {} : { title: optStr(params, "title")! }),
     ...(optStr(params, "provider") == null ? {} : { kind: optStr(params, "provider")! }),
     ...(optStr(params, "cwd") == null ? {} : { cwd: optStr(params, "cwd")! }),
     ...(permissionModeOf(params) == null ? {} : { permissionMode: permissionModeOf(params) }),
@@ -128,6 +129,7 @@ export function createRoom(host: Host, raw: unknown): { readonly chat: ChatSumma
     name: str(params, "name"),
     ...(optStr(params, "description") == null ? {} : { description: optStr(params, "description")! }),
     memberIds: strArray(params, "memberIds"),
+    ...(optStr(params, "directory") == null ? {} : { directory: optStr(params, "directory")!, allowHomeCwd: bool(params, "allowHomeCwd") }),
     ...(requestId == null ? {} : { requestId }),
   });
   host.chat.emitRoster();
@@ -137,6 +139,17 @@ export function createRoom(host: Host, raw: unknown): { readonly chat: ChatSumma
 export function setRoomMembers(host: Host, raw: unknown): ChatSummary | null {
   const params = record(raw);
   const room = host.roster.setRoomMembers(str(params, "roomId"), strArray(params, "memberIds"));
+  if (room == null) return null;
+  host.chat.emitUpsert(room.id);
+  const summary = host.chat.summary(room.id);
+  return summary == null ? null : toChatSummary(summary);
+}
+
+export function setRoomDirectory(host: Host, raw: unknown): ChatSummary | null {
+  const params = record(raw);
+  // `directory` must be present: a string sets it, an explicit null clears it. An absent key is a mistake, not a clear.
+  if (!("directory" in params) || (params.directory !== null && typeof params.directory !== "string")) throw new AppApiError("invalid_args", "directory must be a string, or null to clear it");
+  const room = host.roster.setRoomDirectory(str(params, "roomId"), params.directory as string | null, bool(params, "allowHomeCwd"));
   if (room == null) return null;
   host.chat.emitUpsert(room.id);
   const summary = host.chat.summary(room.id);

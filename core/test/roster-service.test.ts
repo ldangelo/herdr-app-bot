@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { resolveConfig } from "../src/config.ts";
 import { createHerdrCli, type HerdrCli } from "../src/herdr/cli.ts";
@@ -603,6 +604,76 @@ test("relaunchBot: herdr enforces one agent per name, so the old pane must close
     assert.equal(retried.permissionMode, "auto");
   } finally {
     setLogSink((line) => process.stderr.write(`${line}\n`));
+    await h.cleanup();
+  }
+});
+
+test("a room can have a working directory: validated, stored resolved, kept by other edits, clearable", async () => {
+  const h = harness();
+  try {
+    await h.service.createBot({ id: "a", name: "A" });
+    await h.service.briefSettled("a");
+    const room = h.service.createRoom({ name: "Shop", memberIds: ["a"], directory: `${h.temp.home}/` });
+    assert.equal(room.directory, resolve(h.temp.home), "stored as a resolved path, without the trailing slash");
+    assert.equal(h.rooms.get(room.id)?.directory, resolve(h.temp.home), "and persisted");
+    // Other edits must not drop it.
+    assert.equal(h.service.updateRoom(room.id, { name: "Shop 2" })?.directory, resolve(h.temp.home));
+    assert.equal(h.service.setRoomMembers(room.id, ["a"])?.directory, resolve(h.temp.home));
+    // Change it, then clear it.
+    const other = `${h.temp.home}/work`;
+    require_dir(other);
+    assert.equal(h.service.setRoomDirectory(room.id, other)?.directory, other);
+    const cleared = h.service.setRoomDirectory(room.id, null);
+    assert.equal(cleared?.directory, undefined);
+    assert.equal("directory" in (h.rooms.get(room.id) ?? {}), false, "clearing removes the field instead of storing an empty one");
+    assert.equal(h.service.setRoomDirectory("room-ghost", other), null);
+    // A room made without one has none.
+    assert.equal(h.service.createRoom({ name: "Plain", memberIds: ["a"] }).directory, undefined);
+  } finally {
+    await h.cleanup();
+  }
+});
+
+function require_dir(path: string): void {
+  mkdirSync(path, { recursive: true });
+}
+
+test("a room's directory must be an absolute path to a folder that exists, and not the home folder unless confirmed", async () => {
+  const h = harness();
+  try {
+    await h.service.createBot({ id: "a", name: "A" });
+    await h.service.briefSettled("a");
+    const rejects = (directory: string, code: string, allowHomeCwd = false) =>
+      assert.throws(() => h.service.createRoom({ name: "r", memberIds: ["a"], directory, allowHomeCwd }), (e: unknown) => e instanceof RosterError && e.code === code, directory);
+    rejects("relative/path", "invalid_directory");
+    rejects("   ", "invalid_directory");
+    rejects(`${h.temp.home}/does-not-exist`, "invalid_directory");
+    writeFileSync(`${h.temp.home}/a-file`, "x");
+    rejects(`${h.temp.home}/a-file`, "invalid_directory");
+    rejects(homedir(), "home_cwd_requires_confirmation");
+    assert.equal(h.service.createRoom({ name: "r", memberIds: ["a"], directory: homedir(), allowHomeCwd: true }).directory, resolve(homedir()));
+    // A bad directory on an existing room leaves it untouched.
+    const room = h.service.createRoom({ name: "ok", memberIds: ["a"], directory: h.temp.home });
+    assert.throws(() => h.service.setRoomDirectory(room.id, "nope"), (e: unknown) => e instanceof RosterError && e.code === "invalid_directory");
+    assert.equal(h.rooms.get(room.id)?.directory, resolve(h.temp.home));
+    assert.equal(h.rooms.list().filter((r) => r.name === "r").length, 1, "only the confirmed home room was created");
+  } finally {
+    await h.cleanup();
+  }
+});
+
+test("a bot's role: createBot keeps a trimmed title on a spawned and on an adopted bot, and the bot is told it", async () => {
+  const h = harness({ agents: [{ name: null, agent: "grok", agent_status: "idle", pane_id: "w7:p3", tab_id: "w7:t1", workspace_id: "w7", cwd: "/work/x" }], workspaces: [] });
+  try {
+    const spawned = await h.service.createBot({ id: "atlas", name: "Atlas", title: "  Code reviewer  ", description: "Finds bugs." });
+    assert.equal(spawned.title, "Code reviewer");
+    const adopted = await h.service.createBot({ id: "scout", name: "Scout", adoptPaneId: "w7:p3", title: "Researcher" });
+    assert.equal(adopted.title, "Researcher");
+    const none = await h.service.createBot({ id: "plain", name: "Plain", title: "   " });
+    assert.equal("title" in none, false, "an empty role is absent, not an empty string");
+    assert.deepEqual(h.service.memberIdFor("atlas"), { id: "atlas", name: "Atlas", description: "Finds bugs.", title: "Code reviewer" });
+    for (const id of ["atlas", "scout", "plain"]) await h.service.briefSettled(id);
+  } finally {
     await h.cleanup();
   }
 });

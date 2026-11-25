@@ -7,6 +7,8 @@ export interface RoomIdentity {
   readonly id: string;
   readonly name: string;
   readonly description: string;
+  /** The room's shared working folder, if it has one: every turn tells the bot to work there. */
+  readonly directory?: string | null;
 }
 
 export function buildIdentityBrief(args: { readonly bot: RoomMember; readonly userName: string; readonly cliPath: string }): string {
@@ -117,6 +119,7 @@ export function buildRoomTurnPrompt(args: {
     ...crossChatInstructions(cliPath),
     "Use say for this room.",
     ...(room.description.trim().length > 0 ? [`Room goal: ${room.description.trim()}`] : []),
+    ...(room.directory != null && room.directory.trim().length > 0 ? [`Room working directory: ${room.directory.trim()}. This room works there: cd into it, or use absolute paths under it, when you read or change files for the room.`] : []),
     newMessages.length === 0 ? "No new messages in the room since your last turn." : `New messages in the room (oldest first):\n${formatRoomHistory(newMessages, member.id)}`,
     ...heldLines(held),
     ...turnInstructions(room.id, member, cliPath),

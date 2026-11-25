@@ -93,3 +93,8 @@ test("serve takes --ws and --exit-when-idle, and rejects anything else", () => {
     assert.ok("error" in parseCliArgs(["serve", ...bad], {}), bad.join(" "));
   }
 });
+
+test("room create takes --dir, the folder the room's bots are told to work in", () => {
+  assert.deepEqual(parseCliArgs(["room", "create", "Shop", "--members", "a,b", "--dir", "/work/shop"], env), { kind: "control", method: "room.create", params: { name: "Shop", memberIds: ["a", "b"], directory: "/work/shop" }, output: "json" });
+  assert.deepEqual(parseCliArgs(["room", "create", "Shop", "--members", "a,b"], env), { kind: "control", method: "room.create", params: { name: "Shop", memberIds: ["a", "b"] }, output: "json" }, "optional");
+});

@@ -66,6 +66,7 @@ export function toChatSummary(summary: AgentSummary): ChatSummary {
     isHiddenFromSidebar: summary.isHiddenFromSidebar,
     isGroup: summary.isGroup,
     memberIds: summary.memberIds,
+    directory: summary.directory,
     bot: toBotFacts(summary),
   };
 }
