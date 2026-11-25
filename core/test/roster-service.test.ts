@@ -115,6 +115,28 @@ test("createBot rejects a cwd that resolves to exactly the home directory unless
   }
 });
 
+test("a bot whose briefing times out is interrupted, so it stops working and can take room turns", async () => {
+  const h = harness();
+  try {
+    const keys: Array<{ target: string; keys: readonly string[] }> = [];
+    const stuckCli: HerdrCli = {
+      ...h.cli,
+      async agentPrompt(args) {
+        if (args.wait) throw new Error("timed out waiting for idle");
+        return h.cli.agentPrompt(args);
+      },
+      async agentSendKeys(target, sent) { keys.push({ target, keys: sent }); },
+    };
+    const service = new RosterService({ config: h.config, profiles: h.profiles, rooms: h.rooms, cli: stuckCli, mirror: h.mirror, now: () => 1_000, onNotice: (chatId, text) => h.notices.push(`${chatId}: ${text}`) });
+    await service.createBot({ id: "runaway", name: "Runaway" });
+    await service.briefSettled("runaway");
+    assert.deepEqual(keys, [{ target: "runaway", keys: ["esc"] }]);
+    assert.match(h.notices.join("\n"), /runaway: runaway did not confirm its room briefing yet .*It was interrupted/);
+  } finally {
+    await h.cleanup();
+  }
+});
+
 test("createBot resolves before the identity brief settles, so a CLI that never confirms the brief cannot block bot creation", async () => {
   const h = harness();
   try {

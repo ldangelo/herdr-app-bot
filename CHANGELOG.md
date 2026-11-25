@@ -6,6 +6,15 @@ All notable changes to herdr-bot are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-25
+
+### Fixed
+
+- A bot's role text is now introduced as standing guidance, and its setup message asks for nothing but "ok". An agent
+  such as Pi that read the persona as a task to start used to run off on its own, stay busy, and be skipped by every
+  room turn.
+- A bot that does not confirm its setup message in time is interrupted (Escape) so it goes idle and can take turns.
+
 ## [1.5.0] - 2026-11-25
 
 ### Added
