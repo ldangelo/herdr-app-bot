@@ -4,10 +4,12 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle, TextareaState, Textarea } from "gpui-base";
-import { appHome, checking, hc, home, props, readTextFile, theme } from "herdr";
+import { appHome, checking, exec, hc, home, props, readTextFile, theme } from "herdr";
+import { arch, platform } from "os";
 import { WebSocket } from "websocket";
 import { AppApiClient } from "./client.js";
 import { HostMissingError, connectToHost, hostLaunchArgs, isHostAlreadyStarting } from "./host.js";
+import { DEFAULT_SOURCE, describeSize, installHost, planInstall } from "./install.js";
 import { applyEvent, statusOf, summarize, visibleChats } from "./state.js";
 import { NewBot } from "./newbot.js";
 import { applyTranscriptEvent, isOneClickPrompt, isSeqGap, lastSeq, mergeEntries, visibleEntries } from "./transcript.js";
@@ -15,18 +17,31 @@ import { applyTranscriptEvent, isOneClickPrompt, isSeqGap, lastSeq, mergeEntries
 const MAX_BACKOFF_MS = 10000;
 const PAGE_SIZE = 200;
 
-/** Where the host keeps its files; `<appHome>/herdr-bot.json` {"home": "..."} overrides ~/.herdr-bot. */
-async function loadBotHome() {
-  let botHome = `${home()}/.herdr-bot`;
+/**
+ * `<appHome>/herdr-bot.json`: {"home": "..."} overrides ~/.herdr-bot (where the host keeps its files) and
+ * {"hostSource": "https://..."} overrides where the host program is downloaded from.
+ */
+async function loadConfig() {
+  const config = { botHome: `${home()}/.herdr-bot`, source: DEFAULT_SOURCE };
   try {
     const raw = await readTextFile(`${appHome()}/herdr-bot.json`);
-    const configured = raw == null ? null : JSON.parse(raw).home;
-    if (typeof configured === "string" && configured.length > 0) botHome = configured;
+    const parsed = raw == null ? {} : JSON.parse(raw);
+    if (typeof parsed.home === "string" && parsed.home.length > 0) config.botHome = parsed.home;
+    if (typeof parsed.hostSource === "string" && parsed.hostSource.length > 0) config.source = parsed.hostSource;
   } catch {
     // an unreadable override is the same as none
   }
-  return botHome;
+  return config;
 }
+
+const fetchText = async (url) => {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.text();
+};
+
+/** curl may be fetching tens of megabytes; everything else is quick. */
+const run = (command, args) => exec(command, args, { timeout: command === "curl" ? 600000 : 60000 });
 
 async function readEndpoint(botHome) {
   try {
@@ -49,7 +64,10 @@ const PHASE_TEXT = {
   connecting: "Connecting to herdr-bot…",
   starting: "Starting the herdr-bot host…",
   disconnected: "Lost the host. Reconnecting…",
+  installing: "Installing the herdr-bot host…",
 };
+
+const INSTALL_STEPS = { manifest: "Checking what to download…", download: "Downloading the herdr-bot host…", verify: "Verifying the download…", install: "Installing…" };
 
 export default class HerdrBot extends View {
   // Not named `props`: that would shadow the imported props() below.
@@ -60,6 +78,10 @@ export default class HerdrBot extends View {
     this.client = null;
     this.alive = true;
     this.retryRequested = false;
+    this.installRequested = props()?.installHost === true; // pre-approved by whoever laid this tab out
+    this.installPlan = null;
+    this.installStep = null;
+    this.installError = null; // survives reconnect attempts, which reset `error`
     this.lastEventSeq = null;
     // The open chat, if any: its entries, and what the composer and scroll position are doing.
     // `props.chat` opens straight into that chat (a tab or palette entry can ask for one).
@@ -107,7 +129,8 @@ export default class HerdrBot extends View {
   // ---- connection -------------------------------------------------------------------------------
 
   async lifecycle(cx) {
-    const botHome = await loadBotHome();
+    const { botHome, source } = await loadConfig();
+    this.source = source;
     let backoff = 1000;
     while (this.alive) {
       let fatal = false;
@@ -155,9 +178,27 @@ export default class HerdrBot extends View {
       this.client = null;
       cx.notify();
       if (fatal) {
-        // Nothing to retry until the person installs herdr-bot (or presses Retry).
+        // The host program is not here. Say what a download would be, then wait to be told to go ahead (or to look again).
+        this.installPlan = await planInstall({ source, platform: platform(), arch: arch(), fetchText }).catch((error) => ({ ok: false, reason: String(error.message ?? error) }));
+        cx.notify();
         this.retryRequested = false;
-        while (this.alive && !this.retryRequested) await cx.sleep(500);
+        // (It also stops waiting if the host appears some other way: another copy of this mod installed it.)
+        while (this.alive && !this.retryRequested && !this.installRequested && (await readTextFile(`${botHome}/bin/herdr-bot`)) == null) await cx.sleep(300);
+        if (this.alive && this.installRequested && this.installPlan.ok) {
+          this.installRequested = false;
+          this.phase = "installing";
+          this.installError = null;
+          this.installStep = INSTALL_STEPS.manifest;
+          cx.notify();
+          try {
+            await installHost({ source, botHome, platform: platform(), arch: arch(), fetchText, exec: run, onStep: (step) => { this.installStep = INSTALL_STEPS[step]; cx.notify(); } });
+          } catch (error) {
+            this.installError = String((error && error.message) || error);
+            this.phase = "missing";
+          }
+          this.installStep = null;
+        }
+        this.installRequested = false;
       } else {
         await cx.sleep(backoff);
         backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
@@ -329,6 +370,29 @@ export default class HerdrBot extends View {
       .when(Boolean(action), (el) => el.child(this.button(t, "notice-action", action, true, onAction)));
   }
 
+  /** The host program is not installed: say what a download is, and let the person decide. */
+  missingView(t) {
+    const plan = this.installPlan;
+    const again = (_event, cx) => {
+      this.retryRequested = true;
+      cx.notify();
+    };
+    if (plan == null) return this.notice(t, "herdr-bot needs its host program", "Checking where to get it…");
+    if (!plan.ok) return this.notice(t, "herdr-bot cannot be installed here", plan.reason, "Check again", again);
+    const where = (() => { try { return new URL(this.source).host; } catch { return this.source; } })();
+    return this.notice(
+      t,
+      "herdr-bot needs its host program",
+      this.installError ?? `Download ${describeSize(plan.size)} from ${where}${plan.version ? ` (version ${plan.version})` : ""}. It is checked against its checksum, then run on this computer.`,
+      this.installError ? "Try again" : "Download",
+      (_event, cx) => {
+        this.installRequested = true;
+        this.installError = null;
+        cx.notify();
+      },
+    );
+  }
+
   button(t, id, label, primary, onClick, disabled = false) {
     return div()
       .id(id)
@@ -443,10 +507,8 @@ export default class HerdrBot extends View {
     const counts = summarize(this.chats);
     let body;
     if (this.phase === "ready") body = this.selected != null ? this.chatView(t) : this.screen === "new-bot" ? this.newBot.render(t) : this.listView(t);
-    else if (this.phase === "missing") body = this.notice(t, "herdr-bot is not installed", this.error, "Retry", (_event, cx) => {
-      this.retryRequested = true;
-      cx.notify();
-    });
+    else if (this.phase === "missing") body = this.missingView(t);
+    else if (this.phase === "installing") body = this.notice(t, this.installStep ?? PHASE_TEXT.installing, "This runs once. The file is checked before it is used.");
     else if (this.phase === "error") body = this.notice(t, "Cannot reach herdr-bot", this.error);
     else body = this.notice(t, PHASE_TEXT[this.phase] ?? "Connecting…");
     return v_flex()
