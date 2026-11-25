@@ -247,7 +247,7 @@ export class NewBot {
       .child(v_flex().gap(6).child(this.heading(t, "Name")).child(this.field(t, this.nameInput)))
       .child(this.roleFields(t))
       .child(v_flex().gap(6).child(this.heading(t, "Provider")).child(this.choices(t, "provider", PROVIDERS, this.form.provider, (id, cx) => this.pickProvider(id, cx))))
-      .child(this.modelPicker(t))
+      .when(Boolean(provider?.supportsModel), (el) => el.child(this.modelPicker(t)))
       .when(Boolean(provider?.supportsReasoning), (el) => el.child(v_flex().gap(6).child(this.heading(t, "Reasoning")).child(this.choices(t, "effort", REASONING_EFFORTS.map((id) => ({ id, label: id })), this.form.reasoningEffort, (id, cx) => {
         this.form = { ...this.form, reasoningEffort: id };
         cx.notify();
