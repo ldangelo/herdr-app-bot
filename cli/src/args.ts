@@ -4,7 +4,7 @@ export type CliOutput = "json" | "transcript";
 
 export type CliCommand =
   | { readonly kind: "control"; readonly method: string; readonly params: Record<string, unknown>; readonly output: CliOutput }
-  | { readonly kind: "serve" }
+  | { readonly kind: "serve"; readonly ws: boolean; readonly exitWhenIdleSeconds: number | null }
   | { readonly kind: "install-shim" };
 
 export type CliParse = CliCommand | { readonly error: string };
@@ -89,6 +89,28 @@ function nonEmptyEnv(value: string | undefined): string | null {
   return value != null && value.length > 0 ? value : null;
 }
 
+/**
+ * `serve [--ws] [--exit-when-idle <seconds>]`: `--ws` also serves the app API on a loopback WebSocket (for a
+ * herdr-app mod) and publishes where in `<home>/ws.json`; `--exit-when-idle` (implies `--ws`) makes the host
+ * quit once no client has been connected for that long, so it stops with the app that started it.
+ */
+function parseServe(argv: readonly string[]): CliParse {
+  let ws = false;
+  let exitWhenIdleSeconds: number | null = null;
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]!;
+    if (token === "--ws") ws = true;
+    else if (token === "--exit-when-idle") {
+      const value = Number(argv[index + 1]);
+      if (!Number.isFinite(value) || value <= 0) return { error: "serve --exit-when-idle needs a positive number of seconds" };
+      exitWhenIdleSeconds = value;
+      ws = true;
+      index += 1;
+    } else return { error: `serve: unknown option "${token}"` };
+  }
+  return { kind: "serve", ws, exitWhenIdleSeconds };
+}
+
 export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): CliParse {
   const [command, ...rest] = argv;
   // The calling bot is the terminal it runs in: herdr injects HERDR_PANE_ID, herdr-core (hc) HC_TERMINAL_ID.
@@ -137,7 +159,7 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
     }
     case "bot": return parseBot(rest);
     case "room": return parseRoom(rest);
-    case "serve": return { kind: "serve" };
+    case "serve": return parseServe(rest);
     case "install-shim": return { kind: "install-shim" };
     default: return { error: `unknown command "${command}"` };
   }

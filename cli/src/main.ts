@@ -3,8 +3,11 @@ import { fileURLToPath } from "node:url";
 import { resolveConfig } from "../../core/src/config.ts";
 import { controlRequest } from "../../core/src/control/client.ts";
 import { ControlError } from "../../core/src/control/protocol.ts";
+import { createAppApiServer } from "../../core/src/app-api/server.ts";
 import { createHost } from "../../core/src/host.ts";
 import { log } from "../../core/src/log.ts";
+import { IdleExit } from "../../core/src/ws/idle-exit.ts";
+import { removeWsEndpoint, startAppApiWsServer, writeWsEndpoint } from "../../core/src/ws/server.ts";
 import { parseCliArgs, type CliCommand } from "./args.ts";
 import { installShim } from "./shim.ts";
 
@@ -29,17 +32,44 @@ async function runControl(command: Extract<CliCommand, { kind: "control" }>): Pr
   else process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
-async function serve(): Promise<void> {
+async function serve(options: { readonly ws: boolean; readonly exitWhenIdleSeconds: number | null }): Promise<void> {
   const config = resolveConfig();
   const host = createHost(config);
   await host.start();
   installShim(config.home, process.execPath, fileURLToPath(import.meta.url));
-  log("cli", `herdr-bot host is serving (home ${config.home}). Press Ctrl+C to stop.`);
-  await new Promise<void>((resolve) => {
-    const stop = (): void => { void host.stop().then(resolve); };
+
+  let api: ReturnType<typeof createAppApiServer> | null = null;
+  let ws: Awaited<ReturnType<typeof startAppApiWsServer>> | null = null;
+  let idle: IdleExit | null = null;
+  const finished = new Promise<void>((resolve) => {
+    let stopping = false;
+    const stop = (): void => {
+      if (stopping) return;
+      stopping = true;
+      idle?.stop();
+      void (async () => {
+        if (ws != null) { removeWsEndpoint(config.home, ws.token); await ws.close(); }
+        api?.close();
+        await host.stop();
+        resolve();
+      })();
+    };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
+    if (options.ws) {
+      const graceMs = (options.exitWhenIdleSeconds ?? 0) * 1000;
+      if (options.exitWhenIdleSeconds != null) idle = new IdleExit({ graceMs, onIdle: () => { log("cli", `no herdr-app client for ${options.exitWhenIdleSeconds}s; stopping`); stop(); } });
+      api = createAppApiServer(host);
+      void startAppApiWsServer({ api, onClientCount: (count) => idle?.clients(count) }).then((server) => {
+        ws = server;
+        writeWsEndpoint(config.home, { port: server.port, token: server.token, pid: process.pid });
+        log("cli", `app API on ws://127.0.0.1:${server.port} (endpoint in ${config.home}/ws.json)`);
+        idle?.start();
+      }, (error: unknown) => { log("cli", "could not start the app API socket", error instanceof Error ? error.message : String(error)); stop(); });
+    }
   });
+  log("cli", `herdr-bot host is serving (home ${config.home}). Press Ctrl+C to stop.`);
+  await finished;
 }
 
 async function main(): Promise<void> {
@@ -48,7 +78,7 @@ async function main(): Promise<void> {
     process.stderr.write(`herdr-bot: ${parsed.error}\n`);
     process.exit(2);
   }
-  if (parsed.kind === "serve") return serve();
+  if (parsed.kind === "serve") return serve(parsed);
   if (parsed.kind === "install-shim") {
     const path = installShim(resolveConfig().home, process.execPath, fileURLToPath(import.meta.url));
     process.stdout.write(`${path}\n`);
