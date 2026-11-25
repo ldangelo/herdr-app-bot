@@ -23,6 +23,11 @@ export const ID_LABEL = "herdr-bot.id";
 const PENDING_PREFIX = "pending:";
 const DEFAULT_START_TIMEOUT_MS = 30_000;
 const START_POLL_MS = 250;
+/** hc refuses a send to a terminal that is still settling after start ("nothing was typed ... retry"); retry that, and only that. */
+const SETTLE_RETRY_MS = 500;
+const DEFAULT_SETTLE_RETRY_BUDGET_MS = 30_000;
+/** An Enter key right after a paste is the caller finishing what the paste already finished. */
+const PASTE_ENTER_WINDOW_MS = 10_000;
 
 /** What to run for a provider kind, when it is not just the kind's own name. */
 const KIND_COMMANDS: Readonly<Record<string, readonly string[]>> = {
@@ -39,6 +44,8 @@ export interface HcCliOptions {
   readonly cliDir?: string | null;
   /** `herdr-app` binary used for `agentFocus`; absent = focusing is unsupported. */
   readonly runApp?: ((args: readonly string[]) => Promise<void>) | null;
+  /** Per-kind launch commands, over the built-in table (tests substitute a fake agent here). */
+  readonly kindCommands?: Readonly<Record<string, readonly string[]>>;
   readonly startTimeoutMs?: number;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
@@ -83,6 +90,29 @@ function errorFromOutput(stdout: string, stderr: string, fallback: string): Herd
   return new HerdrError("hc_error", stderr.trim().length > 0 ? stderr.trim() : fallback);
 }
 
+/** What `hc keys` types as itself (US layout, unshifted); uppercase goes through `shift+`, everything else has no key. */
+const RAW_TYPABLE: ReadonlySet<string> = new Set([..."abcdefghijklmnopqrstuvwxyz0123456789`-=[]\\;',./"]);
+
+export function isHcTypable(text: string): boolean {
+  return [...text].every((character) => character === " " || RAW_TYPABLE.has(character) || (character >= "A" && character <= "Z"));
+}
+
+/** A one-character token is typed as that character; longer tokens ("enter", "ctrl+c", "space") are hc's own key names. */
+export function encodeHcKey(token: string): string {
+  if (token.length !== 1) return token;
+  if (RAW_TYPABLE.has(token)) return token;
+  if (token >= "A" && token <= "Z") return `shift+${token.toLowerCase()}`;
+  throw new HerdrError("hc_untypable_key", `hc cannot type ${JSON.stringify(token)} as a key press`);
+}
+
+/** hc says "nothing was typed" when a send is refused before any input (e.g. the terminal is still settling after start): safe to retry. */
+function isNotTypedYet(error: unknown): boolean {
+  if (!(error instanceof HerdrError) || error.code !== "hc_unavailable") return false;
+  const detail = error.detail;
+  const hint = isRecord(detail) && isRecord(detail.error) ? str(detail.error.hint) : null;
+  return hint != null && hint.includes("nothing was typed");
+}
+
 function mapState(state: unknown): HerdrAgentStatus {
   return state === "idle" || state === "working" || state === "blocked" || state === "done" ? state : "unknown";
 }
@@ -124,6 +154,8 @@ export function createHcCliFromRunner(runner: RawHerdrRunner, options: HcCliOpti
   let pendingCounter = 0;
   /** address -> bot id for terminals whose name is not their id (adopted ones). Labels never change behind our back. */
   const idByAddress = new Map<string, string | null>();
+  /** address -> when text was last pasted (and so already submitted) by `paneSendText`. */
+  const pastedEnter = new Map<string, number>();
 
   async function run(args: readonly string[], timeoutMs?: number): Promise<{ stdout: string; stderr: string }> {
     const { stdout, stderr, code } = await runner(args, timeoutMs == null ? undefined : { timeoutMs });
@@ -186,7 +218,7 @@ export function createHcCliFromRunner(runner: RawHerdrRunner, options: HcCliOpti
   }
 
   function kindArgv(kind: string): readonly string[] {
-    return KIND_COMMANDS[kind] ?? [kind];
+    return options.kindCommands?.[kind] ?? KIND_COMMANDS[kind] ?? [kind];
   }
 
   async function waitReady(address: string, timeoutMs: number): Promise<HerdrAgentInfo> {
@@ -252,7 +284,18 @@ export function createHcCliFromRunner(runner: RawHerdrRunner, options: HcCliOpti
       const address = await resolve(args.target);
       const seconds = args.timeoutMs == null ? [] : ["--timeout", String(Math.max(1, Math.ceil(args.timeoutMs / 1000)))];
       // Long-running when waiting: no process-level timeout, hc's own --timeout bounds it.
-      const result = await runJson(["send", "--json", ...(args.wait ? ["--wait"] : []), ...seconds, address, args.text]);
+      const sendArgs = ["send", "--json", ...(args.wait ? ["--wait"] : []), ...seconds, address, args.text];
+      const retryUntil = now() + Math.min(args.timeoutMs ?? DEFAULT_SETTLE_RETRY_BUDGET_MS, DEFAULT_SETTLE_RETRY_BUDGET_MS);
+      let result: Record<string, unknown>;
+      for (;;) {
+        try {
+          result = await runJson(sendArgs);
+          break;
+        } catch (error) {
+          if (!isNotTypedYet(error) || now() >= retryUntil) throw error;
+          await sleep(SETTLE_RETRY_MS);
+        }
+      }
       if (!args.wait) return null;
       if (result.started === false) throw new HerdrError("agent_prompt_stalled", `${args.target} did not start the turn`, result);
       const wait = isRecord(result.wait) ? result.wait : {};
@@ -281,12 +324,21 @@ export function createHcCliFromRunner(runner: RawHerdrRunner, options: HcCliOpti
 
     async agentSendKeys(target, keys) {
       if (keys.length === 0) return;
-      await run(["keys", await resolve(target), ...keys], 10_000);
+      const address = await resolve(target);
+      // hc can only paste text together with its Enter (see paneSendText), so the Enter that follows a paste is already done.
+      const pastedAt = pastedEnter.get(address);
+      pastedEnter.delete(address);
+      if (keys.length === 1 && keys[0] === "enter" && pastedAt != null && now() - pastedAt < PASTE_ENTER_WINDOW_MS) return;
+      await run(["keys", address, ...keys.map(encodeHcKey)], 10_000);
     },
 
     async paneSendText(paneId, text) {
       if (text.length === 0) return;
-      await run(["keys", await resolve(paneId), ...[...text].map((character) => character === " " ? "space" : character)], 10_000);
+      const address = await resolve(paneId);
+      // hc has no way to type arbitrary text without submitting it: `send` pastes and presses Enter. --force because
+      // the target is typically showing a form (a blocked prompt) that `send` would otherwise refuse to type into.
+      await runJson(["send", "--json", "--force", address, text], 70_000);
+      pastedEnter.set(address, now());
     },
 
     async workspaceList() {
@@ -319,10 +371,11 @@ export function createHcCliFromRunner(runner: RawHerdrRunner, options: HcCliOpti
   };
 }
 
-export function createHcCli(binPath: string, env: NodeJS.ProcessEnv = process.env, config: { readonly cliPath: string; readonly appBin?: string }): HerdrCli {
+export function createHcCli(binPath: string, env: NodeJS.ProcessEnv = process.env, config: { readonly cliPath: string; readonly appBin?: string; readonly kindCommands?: HcCliOptions["kindCommands"] }): HerdrCli {
   const appBin = config.appBin ?? "herdr-app";
   return createHcCliFromRunner(createExecHcRunner(binPath, env), {
     cliDir: dirname(config.cliPath),
+    ...(config.kindCommands == null ? {} : { kindCommands: config.kindCommands }),
     runApp: (args) => new Promise((resolve, reject) => {
       execFile(appBin, [...args], { env, timeout: 10_000 }, (error) => (error == null ? resolve() : reject(new HerdrError("hc_app_failed", error.message))));
     }),

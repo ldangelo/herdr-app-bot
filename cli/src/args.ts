@@ -85,9 +85,14 @@ function parseRoom(argv: readonly string[]): CliParse {
   return { error: "usage: herdr-bot room <create|members>" };
 }
 
+function nonEmptyEnv(value: string | undefined): string | null {
+  return value != null && value.length > 0 ? value : null;
+}
+
 export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): CliParse {
   const [command, ...rest] = argv;
-  const paneId = env.HERDR_PANE_ID ?? "";
+  // The calling bot is the terminal it runs in: herdr injects HERDR_PANE_ID, herdr-core (hc) HC_TERMINAL_ID.
+  const paneId = nonEmptyEnv(env.HERDR_PANE_ID) ?? nonEmptyEnv(env.HC_TERMINAL_ID) ?? "";
   switch (command) {
     case undefined: return { error: USAGE };
     case "say": {

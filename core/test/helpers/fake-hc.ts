@@ -22,9 +22,13 @@ export class FakeHc {
   readonly terminals: FakeHcTerminal[] = [];
   readonly calls: string[][] = [];
   readonly keys: string[][] = [];
+  /** Texts pasted with `send` (address, text, forced). */
+  readonly pasted: { address: string; text: string; force: boolean }[] = [];
   /** What a new `hc run` terminal reports once started; `null` simulates a program that never reports. */
   startStatus: { app: string; state: string } | null = { app: "claude-code", state: "idle" };
   sendOutcome: SendOutcome = "done";
+  /** The next N sends are refused as hc does for a terminal that is still settling ("nothing was typed"). */
+  settlingSends = 0;
   #counter = 0;
 
   add(partial: Partial<FakeHcTerminal> & { address?: string }): FakeHcTerminal {
@@ -110,7 +114,13 @@ export class FakeHc {
     const terminal = this.#find(positional[0] ?? "");
     if (terminal == null) return this.#fail("not_found", `no terminal ${positional[0] ?? ""}`);
     if (terminal.state === "finished") return this.#fail("finished", `${terminal.address} has finished`);
-    if (terminal.status?.state === "blocked") return this.#fail("blocked", `${terminal.address} is blocked (waiting)`);
+    if (this.settlingSends > 0) {
+      this.settlingSends -= 1;
+      return { stdout: "", stderr: `${JSON.stringify({ error: { kind: "unavailable", message: `${terminal.address} is still starting: its output has not settled`, hint: "nothing was typed; check hc read, then retry" } })}\n`, code: 1 };
+    }
+    const force = rest.includes("--force");
+    if (terminal.status?.state === "blocked" && !force) return this.#fail("blocked", `${terminal.address} is blocked (waiting)`);
+    this.pasted.push({ address: terminal.address, text: positional[1] ?? "", force });
     if (!wait) return this.#ok({ started: true, status: "idle", turn: 0 });
     if (this.sendOutcome === "not_started") return this.#ok({ started: false, status: "idle", turn: 0, wait: { ended: false, reason: "not_started" } });
     if (this.sendOutcome === "timeout") return this.#ok({ started: true, status: "done", turn: 1, wait: { ended: false, reason: "timeout", status: "working", terminal: terminal.address, turn: 1 } });

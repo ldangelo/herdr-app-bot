@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createHcCliFromRunner, createHcEventSubscriber } from "../src/herdr/hc-cli.ts";
+import { createHcCliFromRunner, createHcEventSubscriber, encodeHcKey, isHcTypable } from "../src/herdr/hc-cli.ts";
+import { INTERRUPT_ENVELOPE_PREFIX, TURN_ENVELOPE_PREFIX, terminalKeys } from "../src/bots/turn-runner.ts";
 import { HerdrError } from "../src/herdr/types.ts";
 import { FakeHc } from "./helpers/fake-hc.ts";
 import { makeTempHome } from "./helpers/temp-home.ts";
@@ -151,17 +152,90 @@ test("agentPrompt maps hc outcomes onto the error codes the turn runner switches
   await assertCode(cli.agentPrompt({ target: "reviewer", text: "x", wait: true }), "agent_not_running");
 });
 
-test("keys, typed text and reads go to the resolved terminal", async () => {
+test("a send refused while the terminal is still settling is retried; other failures are not", async () => {
+  let clock = 0;
+  const slept: number[] = [];
+  const { hc, cli } = setup({ now: () => clock, sleep: async (ms) => { slept.push(ms); clock += ms; } });
+  await startBot(cli);
+  hc.settlingSends = 2;
+  assert.equal((await cli.agentPrompt({ target: "reviewer", text: "brief", wait: true, timeoutMs: 20_000 }))?.agent_status, "done");
+  assert.deepEqual(slept, [500, 500]);
+  assert.equal(hc.calls.filter((call) => call[0] === "send").length, 3);
+  // Still refused when the budget runs out: the last refusal surfaces.
+  hc.settlingSends = 1_000;
+  await assertCode(cli.agentPrompt({ target: "reviewer", text: "brief", wait: true, timeoutMs: 2_000 }), "hc_unavailable");
+  // A blocked agent is not "not typed yet": no retry.
+  hc.settlingSends = 0;
+  hc.terminals[0]!.status = { app: "claude-code", state: "blocked" };
+  const before = hc.calls.filter((call) => call[0] === "send").length;
+  await assertCode(cli.agentPrompt({ target: "reviewer", text: "x", wait: true }), "agent_blocked");
+  assert.equal(hc.calls.filter((call) => call[0] === "send").length, before + 1);
+});
+
+test("keys and reads go to the resolved terminal; uppercase is shifted and named keys pass through", async () => {
   const { hc, cli } = setup();
   await startBot(cli);
   hc.terminals[0]!.screen = "Allow? 1) yes";
   await cli.agentSendKeys("reviewer", ["down", "enter"]);
-  await cli.paneSendText(hc.terminals[0]!.address, "hi there");
-  assert.deepEqual(hc.keys, [["down", "enter"], ["h", "i", "space", "t", "h", "e", "r", "e"]]);
+  await cli.agentSendKeys("reviewer", terminalKeys("Hi, you."));
+  assert.deepEqual(hc.keys, [["down", "enter"], ["shift+h", "i", ",", "space", "y", "o", "u", "."]]);
   assert.equal(await cli.agentRead("reviewer", 40, "detection"), "Allow? 1) yes");
   assert.deepEqual(hc.calls.filter((call) => call[0] === "read").at(-1), ["read", hc.terminals[0]!.address, "--lines", "40"]);
   await cli.agentSendKeys("reviewer", []);
   assert.equal(hc.keys.length, 2, "no keys, no call");
+});
+
+test("a character hc cannot type fails clearly before anything is sent", async () => {
+  const { hc, cli } = setup();
+  await startBot(cli);
+  await assertCode(cli.agentSendKeys("reviewer", ["a", ":"]), "hc_untypable_key");
+  assert.equal(hc.keys.length, 0);
+});
+
+test("encodeHcKey and isHcTypable follow what hc keys can actually type", () => {
+  for (const token of ["a", "z", "0", "9", "-", "=", ",", ".", "/", ";", "'", "`", "[", "]", "\\"]) assert.equal(encodeHcKey(token), token);
+  assert.equal(encodeHcKey("Q"), "shift+q");
+  for (const named of ["enter", "space", "ctrl+c", "esc", "tab", "down"]) assert.equal(encodeHcKey(named), named);
+  for (const token of [":", "?", "!", "(", "_", "\"", "é", "@"]) assert.throws(() => encodeHcKey(token), { code: "hc_untypable_key" });
+  assert.equal(isHcTypable("Hello world, it's 9-5."), true);
+  assert.equal(isHcTypable("why?"), false);
+  assert.equal(isHcTypable("é"), false);
+});
+
+test("the typed envelope prefixes only use characters hc can type", () => {
+  for (const prefix of [TURN_ENVELOPE_PREFIX, INTERRUPT_ENVELOPE_PREFIX]) {
+    assert.equal(isHcTypable(prefix), true, prefix);
+    assert.doesNotThrow(() => terminalKeys(prefix).map(encodeHcKey));
+  }
+});
+
+test("typed answer text is pasted with its Enter, and the Enter that follows is swallowed once", async () => {
+  let clock = 1_000;
+  const { hc, cli } = setup({ now: () => clock });
+  await startBot(cli);
+  const address = hc.terminals[0]!.address;
+  hc.terminals[0]!.status = { app: "claude-code", state: "blocked" };
+  await cli.paneSendText(address, "Use postgres: yes (v15)?");
+  assert.deepEqual(hc.pasted.at(-1), { address, text: "Use postgres: yes (v15)?", force: true });
+  await cli.agentSendKeys("reviewer", ["enter"]);
+  assert.equal(hc.keys.length, 0, "the paste already submitted it");
+  await cli.agentSendKeys("reviewer", ["enter"]);
+  assert.deepEqual(hc.keys, [["enter"]], "only one Enter is swallowed");
+});
+
+test("the swallow does not outlive its window or other keys", async () => {
+  let clock = 1_000;
+  const { hc, cli } = setup({ now: () => clock });
+  await startBot(cli);
+  const address = hc.terminals[0]!.address;
+  await cli.paneSendText(address, "late");
+  clock += 11_000;
+  await cli.agentSendKeys("reviewer", ["enter"]);
+  assert.deepEqual(hc.keys, [["enter"]], "too late: a real Enter");
+  await cli.paneSendText(address, "again");
+  await cli.agentSendKeys("reviewer", ["tab"]);
+  await cli.agentSendKeys("reviewer", ["enter"]);
+  assert.deepEqual(hc.keys, [["enter"], ["tab"], ["enter"]], "another key in between cancels it");
 });
 
 test("paneClose forgets a pending pane without calling hc, and kills then removes a live one", async () => {

@@ -73,3 +73,11 @@ test("serve and install-shim are local commands; unknown commands error", () => 
   assert.deepEqual(parseCliArgs([], env), { error: "usage: herdr-bot <say|message|pass|read|rooms|whoami|send|bot|room|status|serve|install-shim> ...\nexample: herdr-bot bot create reviewer --cwd /work/repo --kind codex --model gpt-5.4 --reasoning high" });
   assert.deepEqual(parseCliArgs(["dance"], env), { error: 'unknown command "dance"' });
 });
+
+test("the calling bot is identified by HERDR_PANE_ID, or HC_TERMINAL_ID under herdr-core", () => {
+  const say = ["say", "room-1", "hi"];
+  assert.deepEqual(parseCliArgs(say, { HC_TERMINAL_ID: "t7" }), { kind: "control", method: "say", output: "json", params: { chatId: "room-1", text: "hi", paneId: "t7" } });
+  assert.deepEqual(parseCliArgs(say, { HERDR_PANE_ID: "w1:p2", HC_TERMINAL_ID: "t7" }), { kind: "control", method: "say", output: "json", params: { chatId: "room-1", text: "hi", paneId: "w1:p2" } });
+  assert.deepEqual(parseCliArgs(say, { HERDR_PANE_ID: "", HC_TERMINAL_ID: "t7" }), { kind: "control", method: "say", output: "json", params: { chatId: "room-1", text: "hi", paneId: "t7" } });
+  assert.deepEqual(parseCliArgs(say, {}), { kind: "control", method: "say", output: "json", params: { chatId: "room-1", text: "hi", paneId: "" } });
+});
