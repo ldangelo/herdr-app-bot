@@ -2,8 +2,8 @@ import type { HostConfig } from "./config.ts";
 import { SayInbox } from "./bots/say-inbox.ts";
 import { startControlServer, type ControlServer } from "./control/server.ts";
 import { createControlHandler } from "./control/handlers.ts";
-import { createHerdrCli, type HerdrCli } from "./herdr/cli.ts";
-import { ensureHerdrSession, spawnHerdrSessionServer } from "./herdr/session.ts";
+import type { HerdrCli } from "./herdr/cli.ts";
+import { createAgentRuntime, type AgentRuntime } from "./herdr/runtime.ts";
 import { StatusMirror } from "./herdr/status-mirror.ts";
 import { HostEvents } from "./host-events.ts";
 import { log } from "./log.ts";
@@ -56,6 +56,8 @@ export interface Host {
 
 export interface HostOverrides {
   readonly cli?: HerdrCli;
+  /** Replaces the whole runtime (cli, event channel, session start-up); `cli`/`socketPath`/`ensureSession` still win individually. */
+  readonly runtime?: AgentRuntime;
   readonly socketPath?: string | null;
   readonly now?: () => number;
   /** How start() makes sure the herdr session exists; `null` skips it (tests against the fake herdr). */
@@ -84,8 +86,8 @@ interface HostServices {
 }
 
 /** Constructs the stores plus the mirror/roster/chat/turn wiring, evicting per-chat caches on delete. */
-function buildServices(config: HostConfig, overrides: HostOverrides): HostServices {
-  const cli = overrides.cli ?? createHerdrCli(config.herdrBin, process.env, config.herdrSession);
+function buildServices(config: HostConfig, overrides: HostOverrides, runtime: AgentRuntime): HostServices {
+  const cli = overrides.cli ?? runtime.cli;
   const profiles = new ProfileStore(config.home);
   const rooms = new RoomStore(config.home);
   const view = new ViewStateStore(config.home);
@@ -99,7 +101,8 @@ function buildServices(config: HostConfig, overrides: HostOverrides): HostServic
 
   const mirror = new StatusMirror({
     cli,
-    socketPath: overrides.socketPath === undefined ? config.herdrSocketPath : overrides.socketPath,
+    socketPath: overrides.socketPath === undefined ? runtime.endpoint : overrides.socketPath,
+    subscribe: runtime.subscribe,
     botIds: () => profiles.list().map((profile) => profile.id),
     onChange: (botId, runtime, previous) => {
       // The prompt card entry is appended/updated first so the upsert that follows already sees it.
@@ -135,17 +138,10 @@ function buildServices(config: HostConfig, overrides: HostOverrides): HostServic
   return { cli, profiles, rooms, events, mirror, chat, roster, turns, onboarding, prompts, promptTracker };
 }
 
-function defaultEnsureSession(config: HostConfig, cli: HerdrCli): () => Promise<string> {
-  return () => ensureHerdrSession({
-    session: config.herdrSession,
-    sessionList: () => cli.sessionList(),
-    spawnServer: () => spawnHerdrSessionServer(config.herdrBin, config.herdrSession),
-  });
-}
-
 export function createHost(config: HostConfig, overrides: HostOverrides = {}): Host {
-  const { cli, profiles, rooms, events, mirror, chat, roster, turns: turnService, onboarding, prompts, promptTracker } = buildServices(config, overrides);
-  const ensureSession = overrides.ensureSession === undefined ? defaultEnsureSession(config, cli) : overrides.ensureSession;
+  const runtime = overrides.runtime ?? createAgentRuntime(config, process.env, overrides.cli);
+  const { cli, profiles, rooms, events, mirror, chat, roster, turns: turnService, onboarding, prompts, promptTracker } = buildServices(config, overrides, runtime);
+  const ensureSession = overrides.ensureSession === undefined ? runtime.ensureSession : overrides.ensureSession;
 
   let controlServer: ControlServer | null = null;
   const host: Host = {

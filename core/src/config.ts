@@ -1,5 +1,6 @@
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
+import { RUNTIME_KINDS, type RuntimeKind } from "./herdr/runtime.ts";
 
 export const DEFAULT_TURN_TIMEOUT_MS = 180_000;
 export const DEFAULT_BRIEF_TIMEOUT_MS = 60_000;
@@ -9,6 +10,8 @@ export const DEFAULT_HERDR_SESSION = "herdr-bot";
 
 export interface HostConfig {
   readonly home: string;
+  /** `HERDR_BOT_RUNTIME`: `herdr` (default, terminal herdr 0.9+) or `hc` (herdr-core, for herdr-app). */
+  readonly runtime: RuntimeKind;
   readonly herdrBin: string;
   /** Named herdr session every herdr call targets (`herdr --session <name> …`); `default` is the main session. */
   readonly herdrSession: string;
@@ -34,6 +37,10 @@ function positiveInt(value: string | undefined, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function runtimeKind(value: string | undefined): RuntimeKind {
+  return RUNTIME_KINDS.find((kind) => kind === value) ?? "herdr";
+}
+
 function defaultUserName(): string {
   try {
     return userInfo().username;
@@ -53,6 +60,7 @@ export function resolveConfig(env: NodeJS.ProcessEnv = process.env): HostConfig 
   const herdrSession = nonEmpty(env.HERDR_BOT_SESSION) ?? DEFAULT_HERDR_SESSION;
   return {
     home,
+    runtime: runtimeKind(env.HERDR_BOT_RUNTIME),
     herdrBin: nonEmpty(env.HERDR_BIN_PATH) ?? "herdr",
     herdrSession,
     // Deliberately NOT `HERDR_SOCKET_PATH`: herdr injects that into every pane it manages, pointing at

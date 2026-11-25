@@ -627,3 +627,38 @@ test("stop() leaves no poll timer running, even at a fast interval", async () =>
     temp.cleanup();
   }
 });
+
+test("an injected subscribe replaces the herdr socket and its events trigger a refresh", async () => {
+  const temp = makeTempHome();
+  try {
+    const fake = installFakeHerdr(temp.home, { agents: [agent("reviewer", "idle", "w1:p2")], workspaces: [] });
+    const changes: string[] = [];
+    const seen: { endpoint: string; types: string[] }[] = [];
+    const hook: { fire: () => void } = { fire: () => {} };
+    const mirror = new StatusMirror({
+      cli: createHerdrCli(fake.binPath, fake.env),
+      socketPath: "custom:endpoint",
+      subscribe: (endpoint, subscriptions, handlers) => {
+        seen.push({ endpoint, types: subscriptions.map((subscription) => String(subscription.type)) });
+        hook.fire = () => handlers.onEvent({ event: "pane.updated", data: {} });
+        queueMicrotask(() => handlers.onReady?.());
+        return { close() {} };
+      },
+      botIds: () => ["reviewer"],
+      onChange: (botId, runtime) => changes.push(`${botId}:${runtime.status}`),
+      pollIntervalMs: 60_000,
+      healthyPollIntervalMs: 60_000,
+      debounceMs: 10,
+    });
+    await mirror.refresh();
+    mirror.start();
+    await waitFor(() => seen.length > 0);
+    assert.equal(seen[0]?.endpoint, "custom:endpoint");
+    fake.writeState({ ...fake.readState(), agents: [agent("reviewer", "working", "w1:p2")] });
+    hook.fire();
+    await waitFor(() => changes.includes("reviewer:working"));
+    mirror.stop();
+  } finally {
+    temp.cleanup();
+  }
+});

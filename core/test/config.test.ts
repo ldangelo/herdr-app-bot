@@ -59,3 +59,11 @@ test("resolveConfig ignores herdr's injected HERDR_SOCKET_PATH and stays on its 
   const overridden = resolveConfig({ HERDR_SOCKET_PATH: "/Users/x/.config/herdr/herdr.sock", HERDR_BOT_SOCKET_PATH: "/tmp/mine.sock" });
   assert.equal(overridden.herdrSocketPath, "/tmp/mine.sock", "the app's own override still wins");
 });
+
+test("HERDR_BOT_RUNTIME selects the agent runtime and falls back to herdr", () => {
+  assert.equal(resolveConfig({}).runtime, "herdr");
+  assert.equal(resolveConfig({ HERDR_BOT_RUNTIME: "hc" }).runtime, "hc");
+  assert.equal(resolveConfig({ HERDR_BOT_RUNTIME: "herdr" }).runtime, "herdr");
+  assert.equal(resolveConfig({ HERDR_BOT_RUNTIME: "tmux" }).runtime, "herdr");
+  assert.equal(resolveConfig({ HERDR_BOT_RUNTIME: "" }).runtime, "herdr");
+});
