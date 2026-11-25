@@ -1,16 +1,18 @@
 // herdr-bot for herdr-app: chat with your agents and let them talk to each other.
 // The UI lives here; the host (turn-taking, transcripts, agents via hc) runs as `herdr-bot serve` and is
-// reached over a loopback WebSocket. See client.js, host.js and state.js for the logic behind this view.
+// reached over a loopback WebSocket. See client.js, host.js, state.js and transcript.js for the logic.
 
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
-import { appHome, checking, hc, home, readTextFile, theme } from "herdr";
+import { v_flex, h_flex, ScrollHandle, TextareaState, Textarea } from "gpui-base";
+import { appHome, checking, hc, home, props, readTextFile, theme } from "herdr";
 import { WebSocket } from "websocket";
 import { AppApiClient } from "./client.js";
 import { HostMissingError, connectToHost, hostLaunchArgs, isHostAlreadyStarting } from "./host.js";
 import { applyEvent, statusOf, summarize, visibleChats } from "./state.js";
+import { applyTranscriptEvent, isOneClickPrompt, isSeqGap, lastSeq, mergeEntries, visibleEntries } from "./transcript.js";
 
 const MAX_BACKOFF_MS = 10000;
+const PAGE_SIZE = 200;
 
 /** Where the host keeps its files; `<appHome>/herdr-bot.json` {"home": "..."} overrides ~/.herdr-bot. */
 async function loadBotHome() {
@@ -49,14 +51,31 @@ const PHASE_TEXT = {
 };
 
 export default class HerdrBot extends View {
-  init(props, cx) {
+  // Not named `props`: that would shadow the imported props() below.
+  init(_props, cx) {
     this.phase = "connecting";
     this.error = null;
     this.chats = [];
-    this.selected = null;
     this.client = null;
     this.alive = true;
     this.retryRequested = false;
+    this.lastEventSeq = null;
+    // The open chat, if any: its entries, and what the composer and scroll position are doing.
+    // `props.chat` opens straight into that chat (a tab or palette entry can ask for one).
+    this.selected = typeof props()?.chat === "string" && props().chat.length > 0 ? props().chat : null;
+    this.entries = [];
+    this.loading = false;
+    this.sending = false;
+    this.sendError = null;
+    this.scrollToEnd = false;
+    this.scroll = ScrollHandle.new();
+    this.input = TextareaState.new({ placeholder: "Message", rows: 2 });
+    this.input.set_auto_grow(2, 8);
+    this.input.on("change", (_event, cx) => {
+      this.sendError = null;
+      cx.notify();
+    });
+    this.input.on("submit", (_event, cx) => this.send(cx));
     // `herdr-app check` runs init() for real: start nothing there.
     if (checking()) return;
     cx.spawn(async (cx) => this.lifecycle(cx));
@@ -67,6 +86,8 @@ export default class HerdrBot extends View {
     // The host stops itself shortly after the last client leaves, so there is nothing else to clean up.
     await this.client?.close();
   }
+
+  // ---- connection -------------------------------------------------------------------------------
 
   async lifecycle(cx) {
     const botHome = await loadBotHome();
@@ -84,10 +105,7 @@ export default class HerdrBot extends View {
             const next = new AppApiClient({
               connect: (url) => WebSocket.connect(url),
               sleep: (ms) => cx.sleep(ms),
-              onEvent: (event) => {
-                this.chats = applyEvent(this.chats, event);
-                cx.notify();
-              },
+              onEvent: (event) => this.onEvent(event, cx),
             });
             await next.open(endpoint);
             return next;
@@ -100,9 +118,10 @@ export default class HerdrBot extends View {
           },
         });
         this.client = client;
+        this.lastEventSeq = null;
         backoff = 1000;
         const pump = client.pump();
-        this.chats = await client.request("chat.list");
+        await this.resync(cx);
         this.phase = "ready";
         cx.notify();
         await pump;
@@ -125,6 +144,114 @@ export default class HerdrBot extends View {
     }
   }
 
+  /** Fetches the chat list and the open chat afresh: on connect, and whenever an event may have been missed. */
+  async resync(cx) {
+    this.chats = await this.client.request("chat.list");
+    if (this.selected != null) await this.loadTranscript(this.selected, cx, { replace: true });
+    cx.notify();
+  }
+
+  onEvent(event, cx) {
+    const gap = isSeqGap(this.lastEventSeq, event.seq);
+    this.lastEventSeq = event.seq;
+    this.chats = applyEvent(this.chats, event);
+    if (this.selected != null) {
+      const before = this.entries;
+      this.entries = applyTranscriptEvent(this.entries, this.selected, event);
+      if (this.entries !== before && event.type === "transcript.entryAppended") {
+        this.scrollToEnd = true;
+        this.markRead(cx);
+      }
+    }
+    // The unread flag arrives on a chat.changed that can follow the entry itself: read it again then.
+    if (this.selected != null && event.type === "chat.changed" && event.payload?.id === this.selected && event.payload.hasUnread) this.markRead(cx);
+    if (gap && this.client != null) cx.spawn(async (cx) => this.resync(cx).catch(() => {}));
+    cx.notify();
+  }
+
+  // ---- the open chat ----------------------------------------------------------------------------
+
+  openChat(id, cx) {
+    this.selected = id;
+    this.entries = [];
+    this.sendError = null;
+    this.input.set_value("");
+    cx.spawn(async (cx) => {
+      try {
+        await this.loadTranscript(id, cx, { replace: true });
+        this.input.focus();
+      } catch (error) {
+        this.sendError = String((error && error.message) || error);
+      }
+      cx.notify();
+    });
+    cx.notify();
+  }
+
+  closeChat(cx) {
+    this.selected = null;
+    this.entries = [];
+    this.sendError = null;
+    cx.notify();
+  }
+
+  async loadTranscript(id, cx, { replace }) {
+    this.loading = true;
+    cx.notify();
+    try {
+      const page = await this.client.request("transcript.page", { chatId: id, limit: PAGE_SIZE });
+      if (this.selected !== id) return; // the person moved on while it loaded
+      this.entries = replace ? mergeEntries([], page.entries) : mergeEntries(this.entries, page.entries);
+      this.scrollToEnd = true;
+      this.markRead(cx);
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  /** Clears the unread badge once the newest entry is on screen. */
+  markRead(cx) {
+    const chat = this.chats.find((candidate) => candidate.id === this.selected);
+    const seq = lastSeq(this.entries);
+    if (chat == null || !chat.hasUnread || seq === 0 || this.client == null) return;
+    this.client.request("chat.markRead", { chatId: chat.id, throughSeq: seq }).catch(() => {});
+  }
+
+  send(cx) {
+    const text = this.input.value().trim();
+    if (this.selected == null || text.length === 0 || this.sending || this.client == null) return;
+    const chatId = this.selected;
+    this.sending = true;
+    this.sendError = null;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        await this.client.request("message.send", { chatId, text });
+        this.input.set_value("");
+        this.scrollToEnd = true;
+      } catch (error) {
+        this.sendError = String((error && error.message) || error);
+      }
+      this.sending = false;
+      cx.notify();
+    });
+  }
+
+  answer(view, option, cx) {
+    if (this.client == null || this.selected == null) return;
+    this.sendError = null;
+    cx.spawn(async (cx) => {
+      try {
+        await this.client.request("prompt.answer", { botId: this.selected, signature: view.prompt.signature, action: "option", key: option.key });
+      } catch (error) {
+        this.sendError = String((error && error.message) || error);
+      }
+      cx.notify();
+    });
+  }
+
+  // ---- drawing ----------------------------------------------------------------------------------
+
   mark(t, status) {
     if (status === "blocked") {
       return div().flex_none().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child("Needs you");
@@ -135,9 +262,11 @@ export default class HerdrBot extends View {
     return div().size(8).mx(3).flex_none().rounded(4).bg(t.dim + "66");
   }
 
+  avatar(t, chat, size) {
+    return div().size(size).flex_none().rounded(size / 2).bg(t.raised).flex().items_center().justify_center().text_size(size * 0.43).font_semibold().text_color(t.foreground).child((chat.name || "?").slice(0, 1).toUpperCase());
+  }
+
   row(t, chat) {
-    const status = statusOf(chat);
-    const on = chat.id === this.selected;
     return h_flex()
       .id(`chat-${chat.id}`)
       .px(10)
@@ -146,22 +275,20 @@ export default class HerdrBot extends View {
       .rounded(8)
       .flex_none()
       .items_center()
-      .when(on, (el) => el.bg(t.raised))
+      .cursor_pointer()
       .hover((el) => el.bg(t.hover))
-      .on_click((_event, cx) => {
-        this.selected = chat.id;
-        cx.notify();
-      })
-      .child(div().size(30).flex_none().rounded(15).bg(t.raised).flex().items_center().justify_center().text_size(13).font_semibold().text_color(t.foreground).child((chat.name || "?").slice(0, 1).toUpperCase()))
+      .on_click((_event, cx) => this.openChat(chat.id, cx))
+      .child(this.avatar(t, chat, 30))
       .child(
         v_flex()
           .flex_1()
+          .min_w(0)
           .gap(1)
           .child(div().truncate().text_size(13).font_semibold().text_color(t.foreground).child(chat.name))
           .child(div().truncate().text_size(11.5).text_color(t.muted).child(chat.lastMessagePreview || (chat.kind === "room" ? "Room" : chat.bot?.provider ?? "Bot"))),
       )
       .when(chat.unreadCount > 0, (el) => el.child(div().flex_none().min_w(18).h(18).px(5).rounded(9).bg(t.accent).text_size(10.5).font_semibold().text_color(t.accent_foreground).flex().items_center().justify_center().child(String(chat.unreadCount))))
-      .child(this.mark(t, status));
+      .child(this.mark(t, statusOf(chat)));
   }
 
   notice(t, text, detail, action) {
@@ -173,47 +300,135 @@ export default class HerdrBot extends View {
       .px(24)
       .child(div().text_size(13).text_color(t.foreground).child(text))
       .when(Boolean(detail), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(detail)))
-      .when(Boolean(action), (el) => el.child(
+      .when(Boolean(action), (el) => el.child(this.button(t, "retry", action, true, (_event, cx) => {
+        this.retryRequested = true;
+        cx.notify();
+      })));
+  }
+
+  button(t, id, label, primary, onClick, disabled = false) {
+    return div()
+      .id(id)
+      .px(12)
+      .h(28)
+      .flex_none()
+      .rounded(7)
+      .when(primary, (el) => el.bg(disabled ? t.raised : t.solid).text_color(disabled ? t.dim : t.solid_foreground))
+      .when(!primary, (el) => el.bg(t.raised).text_color(t.foreground).hover((hover) => hover.bg(t.hover)))
+      .text_size(12)
+      .font_semibold()
+      .flex()
+      .items_center()
+      .when(!disabled, (el) => el.cursor_pointer().on_click(onClick))
+      .child(label);
+  }
+
+  /** Message text, one line per newline so paragraphs survive. */
+  body(t, text, color) {
+    return v_flex().gap(2).children(text.split("\n").map((line) => div().text_size(13).text_color(color).child(line.length > 0 ? line : " ")));
+  }
+
+  card(t, view, chat) {
+    const answerable = isOneClickPrompt(view);
+    return v_flex()
+      .gap(8)
+      .p(10)
+      .rounded(10)
+      .border(1)
+      .border_color(answerable ? t.blocked + "66" : t.border)
+      .bg(t.raised)
+      .child(div().text_size(10.5).font_semibold().text_color(answerable ? t.blocked : t.dim).child(answerable ? "NEEDS YOU" : String(view.status).toUpperCase()))
+      .when(Boolean(view.prompt?.title), (el) => el.child(div().text_size(12).font_semibold().text_color(t.foreground).child(view.prompt.title)))
+      .child(this.body(t, view.text, t.foreground))
+      .when(Boolean(view.prompt?.body?.length), (el) => el.child(this.body(t, view.prompt.body.join("\n"), t.muted)))
+      .when(answerable, (el) => el.child(v_flex().gap(4).children(view.prompt.options.map((option) => this.button(t, `answer-${view.id}-${option.key}`, `${option.key}. ${option.label}`, false, (_event, cx) => this.answer(view, option, cx))))))
+      .when(view.status === "pending" && !answerable, (el) => el.child(div().text_size(11.5).text_color(t.muted).child(`This one needs typing or several choices: answer it in ${chat?.name ?? "the bot"}'s terminal.`)));
+  }
+
+  message(t, view, chat) {
+    if (view.role === "notice") return div().px(8).text_size(11.5).text_color(t.dim).child(view.text);
+    if (view.role === "prompt") return this.card(t, view, chat);
+    const mine = view.role === "user";
+    return v_flex()
+      .gap(2)
+      .when(mine, (el) => el.items_end())
+      .when(!mine, (el) => el.items_start())
+      .when(!mine && Boolean(view.author), (el) => el.child(div().px(4).text_size(11).font_semibold().text_color(t.muted).child(view.author)))
+      .child(
         div()
-          .id("retry")
-          .mt(4)
-          .px(12)
-          .h(28)
-          .rounded(7)
-          .bg(t.solid)
-          .text_color(t.solid_foreground)
-          .text_size(12)
-          .font_semibold()
-          .flex()
+          .max_w(280)
+          .px(10)
+          .py(7)
+          .rounded(10)
+          .bg(mine ? t.selected : t.raised)
+          .child(this.body(t, view.text, t.foreground)),
+      );
+  }
+
+  chatView(t) {
+    const chat = this.chats.find((candidate) => candidate.id === this.selected) ?? { id: this.selected, name: this.selected, kind: "bot", bot: null };
+    const views = visibleEntries(this.entries);
+    if (this.scrollToEnd && views.length > 0) {
+      this.scroll.scroll_to_item(views.length - 1);
+      this.scrollToEnd = false;
+    }
+    const empty = this.input.value().trim().length === 0;
+    return v_flex()
+      .flex_1()
+      .min_h(0)
+      .child(
+        h_flex()
+          .h(44)
+          .px(10)
+          .flex_none()
           .items_center()
-          .cursor_pointer()
-          .on_click((_event, cx) => {
-            this.retryRequested = true;
-            cx.notify();
-          })
-          .child(action),
-      ));
+          .gap(8)
+          .border_b(1)
+          .border_color(t.border)
+          .child(div().id("back").px(8).h(26).rounded(6).flex().items_center().cursor_pointer().text_size(14).text_color(t.muted).hover((el) => el.bg(t.hover)).on_click((_event, cx) => this.closeChat(cx)).child("‹"))
+          .child(this.avatar(t, chat, 24))
+          .child(div().flex_1().truncate().text_size(13).font_semibold().child(chat.name))
+          .child(this.mark(t, statusOf(chat))),
+      )
+      .child(
+        views.length === 0
+          ? this.notice(t, this.loading ? "Loading…" : "No messages yet", this.loading ? null : "Say hello below.")
+          : v_flex().id("transcript").flex_1().min_h(0).overflow_y_scroll().track_scroll(this.scroll).p(10).gap(8).children(views.map((view) => this.message(t, view, chat))),
+      )
+      .when(Boolean(this.sendError), (el) => el.child(div().px(12).py(4).text_size(11.5).text_color(t.blocked).child(this.sendError)))
+      .child(
+        h_flex()
+          .flex_none()
+          .p(10)
+          .gap(8)
+          .items_end()
+          .border_t(1)
+          .border_color(t.border)
+          .child(div().flex_1().min_w(0).child(Textarea.new(this.input)))
+          .child(this.button(t, "send", this.sending ? "Sending…" : "Send", true, (_event, cx) => this.send(cx), empty || this.sending)),
+      );
+  }
+
+  listView(t) {
+    const chats = visibleChats(this.chats.slice());
+    if (chats.length === 0) return this.notice(t, "No bots yet", "Create one to start chatting with an agent.");
+    return v_flex().id("chat-list").flex_1().min_h(0).overflow_y_scroll().p(6).gap(2).children(chats.map((chat) => this.row(t, chat)));
   }
 
   render() {
     const t = theme();
-    const chats = visibleChats(this.chats.slice());
     const counts = summarize(this.chats);
-    const body = (() => {
-      if (this.phase === "ready") {
-        if (chats.length === 0) return this.notice(t, "No bots yet", "Create one to start chatting with an agent.");
-        return v_flex().id("chat-list").flex_1().overflow_y_scroll().p(6).gap(2).children(chats.map((chat) => this.row(t, chat)));
-      }
-      if (this.phase === "missing") return this.notice(t, "herdr-bot is not installed", this.error, "Retry");
-      if (this.phase === "error") return this.notice(t, "Cannot reach herdr-bot", this.error);
-      return this.notice(t, PHASE_TEXT[this.phase] ?? "Connecting…");
-    })();
+    let body;
+    if (this.phase === "ready") body = this.selected != null ? this.chatView(t) : this.listView(t);
+    else if (this.phase === "missing") body = this.notice(t, "herdr-bot is not installed", this.error, "Retry");
+    else if (this.phase === "error") body = this.notice(t, "Cannot reach herdr-bot", this.error);
+    else body = this.notice(t, PHASE_TEXT[this.phase] ?? "Connecting…");
     return v_flex()
       .id("herdr-bot")
       .size_full()
       .bg(t.chrome)
       .text_color(t.foreground)
-      .child(
+      .when(this.selected == null || this.phase !== "ready", (el) => el.child(
         h_flex()
           .h(40)
           .px(14)
@@ -223,9 +438,9 @@ export default class HerdrBot extends View {
           .border_b(1)
           .border_color(t.border)
           .child(div().flex_1().text_size(13).font_semibold().child("herdr-bot"))
-          .when(counts.blocked > 0, (el) => el.child(div().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child(`${counts.blocked} need you`)))
-          .when(counts.working > 0, (el) => el.child(div().text_size(11).text_color(t.muted).child(`${counts.working} working`))),
-      )
+          .when(counts.blocked > 0, (row) => row.child(div().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child(`${counts.blocked} need you`)))
+          .when(counts.working > 0, (row) => row.child(div().text_size(11).text_color(t.muted).child(`${counts.working} working`))),
+      ))
       .child(body);
   }
 }
