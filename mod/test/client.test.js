@@ -133,3 +133,19 @@ test("close() ends the connection and rejects what is pending", async () => {
   assert.equal(socket.closed, true);
   assert.equal(client.isOpen, false);
 });
+
+test("a request can ask for a longer timeout than the default", async () => {
+  const timers = [];
+  const { client, socket } = await opened({ sleep: (ms) => new Promise((resolve) => timers.push({ ms, resolve })), requestTimeoutMs: 5000 });
+  const pump = client.pump();
+  const slow = client.request("bot.create", {}, 120000);
+  const quick = client.request("chat.list");
+  await tick();
+  assert.deepEqual(timers.map((timer) => timer.ms), [120000, 5000]);
+  socket.push(JSON.stringify({ id: 1, result: "made" }));
+  socket.push(JSON.stringify({ id: 2, result: [] }));
+  assert.equal(await slow, "made");
+  assert.deepEqual(await quick, []);
+  socket.end();
+  await pump;
+});

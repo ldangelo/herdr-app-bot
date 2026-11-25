@@ -67,3 +67,10 @@ test("HERDR_BOT_RUNTIME selects the agent runtime and falls back to herdr", () =
   assert.equal(resolveConfig({ HERDR_BOT_RUNTIME: "tmux" }).runtime, "herdr");
   assert.equal(resolveConfig({ HERDR_BOT_RUNTIME: "" }).runtime, "herdr");
 });
+
+test("HERDR_BOT_HC_KIND_COMMANDS maps providers to launch commands and ignores anything malformed", () => {
+  assert.equal(resolveConfig({}).hcKindCommands, null);
+  assert.deepEqual(resolveConfig({ HERDR_BOT_HC_KIND_COMMANDS: '{"claude":["/x/fake","--a"],"codex":["/y"]}' }).hcKindCommands, { claude: ["/x/fake", "--a"], codex: ["/y"] });
+  assert.deepEqual(resolveConfig({ HERDR_BOT_HC_KIND_COMMANDS: '{"claude":["/x"],"bad":"nope","empty":[],"mixed":["a",1]}' }).hcKindCommands, { claude: ["/x"] });
+  for (const bad of ["", "not json", "[]", '"x"', "null", '{"claude":"x"}', "{}"]) assert.equal(resolveConfig({ HERDR_BOT_HC_KIND_COMMANDS: bad }).hcKindCommands, null, bad);
+});

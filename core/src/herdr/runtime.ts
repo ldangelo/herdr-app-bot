@@ -42,7 +42,7 @@ export function createHerdrRuntime(config: HostConfig, env: NodeJS.ProcessEnv = 
 }
 
 /** herdr-core's `hc` (the runtime behind herdr-app). It needs no session of its own: `hc server status` starts the core. */
-export function createHcRuntime(config: HostConfig, env: NodeJS.ProcessEnv = process.env, cli: HerdrCli = createHcCli(config.hcBin, env, { cliPath: config.cliPath })): AgentRuntime {
+export function createHcRuntime(config: HostConfig, env: NodeJS.ProcessEnv = process.env, cli: HerdrCli = createHcCli(config.hcBin, env, { cliPath: config.cliPath, ...(config.hcKindCommands == null ? {} : { kindCommands: config.hcKindCommands }) })): AgentRuntime {
   return {
     kind: "hc",
     cli,

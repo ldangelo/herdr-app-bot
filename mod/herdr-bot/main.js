@@ -9,6 +9,7 @@ import { WebSocket } from "websocket";
 import { AppApiClient } from "./client.js";
 import { HostMissingError, connectToHost, hostLaunchArgs, isHostAlreadyStarting } from "./host.js";
 import { applyEvent, statusOf, summarize, visibleChats } from "./state.js";
+import { NewBot } from "./newbot.js";
 import { applyTranscriptEvent, isOneClickPrompt, isSeqGap, lastSeq, mergeEntries, visibleEntries } from "./transcript.js";
 
 const MAX_BACKOFF_MS = 10000;
@@ -69,6 +70,22 @@ export default class HerdrBot extends View {
     this.sendError = null;
     this.scrollToEnd = false;
     this.scroll = ScrollHandle.new();
+    // "list" (or the open chat), or the new-bot screen.
+    this.screen = "list";
+    // `props.screen: "new-bot"` opens that screen once connected (a palette entry or tab can ask for it).
+    this.startScreen = props()?.screen === "new-bot" ? "new-bot" : null;
+    this.newBot = new NewBot({
+      client: () => this.client,
+      button: (t, id, label, primary, onClick, disabled) => this.button(t, id, label, primary, onClick, disabled),
+      onDone: (chatId, cx) => {
+        this.screen = "list";
+        this.openChat(chatId, cx);
+      },
+      onCancel: (cx) => {
+        this.screen = "list";
+        cx.notify();
+      },
+    });
     this.input = TextareaState.new({ placeholder: "Message", rows: 2 });
     this.input.set_auto_grow(2, 8);
     this.input.on("change", (_event, cx) => {
@@ -123,6 +140,10 @@ export default class HerdrBot extends View {
         const pump = client.pump();
         await this.resync(cx);
         this.phase = "ready";
+        if (this.startScreen === "new-bot") {
+          this.startScreen = null;
+          this.openNewBot(cx);
+        }
         cx.notify();
         await pump;
         this.phase = "disconnected";
@@ -186,6 +207,11 @@ export default class HerdrBot extends View {
       cx.notify();
     });
     cx.notify();
+  }
+
+  openNewBot(cx) {
+    this.screen = "new-bot";
+    this.newBot.open(cx);
   }
 
   closeChat(cx) {
@@ -291,7 +317,7 @@ export default class HerdrBot extends View {
       .child(this.mark(t, statusOf(chat)));
   }
 
-  notice(t, text, detail, action) {
+  notice(t, text, detail, action, onAction) {
     return v_flex()
       .flex_1()
       .items_center()
@@ -300,10 +326,7 @@ export default class HerdrBot extends View {
       .px(24)
       .child(div().text_size(13).text_color(t.foreground).child(text))
       .when(Boolean(detail), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(detail)))
-      .when(Boolean(action), (el) => el.child(this.button(t, "retry", action, true, (_event, cx) => {
-        this.retryRequested = true;
-        cx.notify();
-      })));
+      .when(Boolean(action), (el) => el.child(this.button(t, "notice-action", action, true, onAction)));
   }
 
   button(t, id, label, primary, onClick, disabled = false) {
@@ -411,7 +434,7 @@ export default class HerdrBot extends View {
 
   listView(t) {
     const chats = visibleChats(this.chats.slice());
-    if (chats.length === 0) return this.notice(t, "No bots yet", "Create one to start chatting with an agent.");
+    if (chats.length === 0) return this.notice(t, "No bots yet", "Start an agent, or adopt one that is already running.", "New bot", (_event, cx) => this.openNewBot(cx));
     return v_flex().id("chat-list").flex_1().min_h(0).overflow_y_scroll().p(6).gap(2).children(chats.map((chat) => this.row(t, chat)));
   }
 
@@ -419,8 +442,11 @@ export default class HerdrBot extends View {
     const t = theme();
     const counts = summarize(this.chats);
     let body;
-    if (this.phase === "ready") body = this.selected != null ? this.chatView(t) : this.listView(t);
-    else if (this.phase === "missing") body = this.notice(t, "herdr-bot is not installed", this.error, "Retry");
+    if (this.phase === "ready") body = this.selected != null ? this.chatView(t) : this.screen === "new-bot" ? this.newBot.render(t) : this.listView(t);
+    else if (this.phase === "missing") body = this.notice(t, "herdr-bot is not installed", this.error, "Retry", (_event, cx) => {
+      this.retryRequested = true;
+      cx.notify();
+    });
     else if (this.phase === "error") body = this.notice(t, "Cannot reach herdr-bot", this.error);
     else body = this.notice(t, PHASE_TEXT[this.phase] ?? "Connecting…");
     return v_flex()
@@ -428,7 +454,7 @@ export default class HerdrBot extends View {
       .size_full()
       .bg(t.chrome)
       .text_color(t.foreground)
-      .when(this.selected == null || this.phase !== "ready", (el) => el.child(
+      .when(this.phase !== "ready" || (this.selected == null && this.screen === "list"), (el) => el.child(
         h_flex()
           .h(40)
           .px(14)
@@ -438,6 +464,7 @@ export default class HerdrBot extends View {
           .border_b(1)
           .border_color(t.border)
           .child(div().flex_1().text_size(13).font_semibold().child("herdr-bot"))
+          .when(this.phase === "ready", (row) => row.child(div().id("new-bot").px(10).h(24).rounded(6).flex().items_center().cursor_pointer().text_size(12).font_semibold().text_color(t.foreground).bg(t.raised).hover((el) => el.bg(t.hover)).on_click((_event, cx) => this.openNewBot(cx)).child("+ New")))
           .when(counts.blocked > 0, (row) => row.child(div().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child(`${counts.blocked} need you`)))
           .when(counts.working > 0, (row) => row.child(div().text_size(11).text_color(t.muted).child(`${counts.working} working`))),
       ))

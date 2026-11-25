@@ -59,8 +59,8 @@ export class AppApiClient {
     this.#rejectAll(new Error("disconnected"));
   }
 
-  /** Resolves with the method's result; rejects with an Error carrying `.code` for an API error. */
-  async request(method, params = {}) {
+  /** Resolves with the method's result; rejects with an Error carrying `.code` for an API error. Creating a bot waits on the agent starting, so it passes a longer `timeoutMs`. */
+  async request(method, params = {}, timeoutMs = this.requestTimeoutMs) {
     const socket = this.socket;
     if (socket == null) throw new Error("not connected");
     const id = this.nextId++;
@@ -71,7 +71,7 @@ export class AppApiClient {
       this.pending.delete(id);
       throw error;
     }
-    const timeout = this.sleep(this.requestTimeoutMs).then(() => {
+    const timeout = this.sleep(timeoutMs).then(() => {
       if (this.pending.delete(id)) throw new Error(`${method} timed out`);
       return new Promise(() => {});
     });
