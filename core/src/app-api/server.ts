@@ -44,6 +44,7 @@ const METHOD_TABLE: Readonly<Record<AppApiMethod, Handler>> = {
 
   "room.create": (host, params) => botHandlers.createRoom(host, params),
   "room.setMembers": (host, params) => botHandlers.setRoomMembers(host, params),
+  "room.setDirectory": (host, params) => botHandlers.setRoomDirectory(host, params),
 
   "prompt.answer": (host, params) => botHandlers.answerPrompt(host, params),
 

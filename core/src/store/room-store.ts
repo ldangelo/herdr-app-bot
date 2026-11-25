@@ -7,6 +7,8 @@ export interface RoomConfig {
   readonly name: string;
   readonly description: string;
   readonly memberIds: readonly string[];
+  /** The folder every bot in the room is told to work in (absolute). Absent on rooms made before rooms had one. */
+  readonly directory?: string;
   readonly isHiddenFromSidebar: boolean;
   readonly createdAt: number;
   readonly updatedAt: number;
@@ -37,6 +39,7 @@ export function projectRoomConfig(value: unknown): RoomConfig | null {
     name: value.name,
     description: typeof value.description === "string" ? value.description : "",
     memberIds: dedupeIds(value.memberIds),
+    ...(typeof value.directory === "string" && value.directory.length > 0 ? { directory: value.directory } : {}),
     isHiddenFromSidebar: value.isHiddenFromSidebar === true,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,

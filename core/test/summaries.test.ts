@@ -82,3 +82,10 @@ test("bot summary carries the blocked prompt on herdrBot.prompt and drops it whe
   const idle = botSummary({ profile: sampleProfile(), runtime: RUNTIME, last: null, view: VIEW, isTurnActive: false });
   assert.equal(idle.herdrBot?.prompt, null);
 });
+
+test("a room summary carries the room's directory, and a bot or a room without one has none", () => {
+  const withDir = roomSummary({ room: { ...sampleRoom(), directory: "/work/shop" }, last: LAST, view: VIEW, isTurnActive: false });
+  assert.equal(withDir.directory, "/work/shop");
+  assert.equal(roomSummary({ room: sampleRoom(), last: LAST, view: VIEW, isTurnActive: false }).directory, null);
+  assert.equal(botSummary({ profile: sampleProfile(), runtime: OFFLINE_RUNTIME, last: LAST, view: VIEW, isTurnActive: false }).directory, null, "a bot's own folder is in herdrBot.cwd");
+});

@@ -60,6 +60,8 @@ export interface AgentSummary {
   readonly origin: "user";
   readonly isGroup: boolean;
   readonly memberIds: readonly string[];
+  /** A room's shared working folder; null for a bot DM (its own folder is in `herdrBot.cwd`) and for rooms without one. */
+  readonly directory: string | null;
   readonly conversationPartnerIds: readonly string[];
   readonly herdrBot: HerdrBotFacts | null;
 }
@@ -137,6 +139,7 @@ export function botSummary(args: {
     origin: "user",
     isGroup: false,
     memberIds: [],
+    directory: null,
     conversationPartnerIds: [],
     herdrBot: { kind: profile.kind, status: runtime.status, paneId: runtime.paneId ?? profile.herdr.paneId, cwd: profile.cwd, adopted: profile.adopted, permissionMode: profile.permissionMode, model: profile.model, reasoningEffort: profile.reasoningEffort, onboarding: profile.onboarding ?? null, prompt: runtime.prompt },
   };
@@ -179,6 +182,7 @@ export function roomSummary(args: {
     origin: "user",
     isGroup: true,
     memberIds: room.memberIds,
+    directory: room.directory ?? null,
     conversationPartnerIds: [],
     herdrBot: null,
   };

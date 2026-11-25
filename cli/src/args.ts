@@ -76,14 +76,14 @@ function parseRoom(argv: readonly string[]): CliParse {
     const name = positional[0];
     if (name == null) return { error: "room create needs <name>" };
     const memberIds = (options.members ?? "").split(",").map((s) => s.trim()).filter((s) => s.length > 0);
-    return control("room.create", withOptional({ name, memberIds }, options, { description: "description" }));
+    return control("room.create", withOptional({ name, memberIds }, options, { description: "description", dir: "directory" }));
   }
   if (sub === "members") {
     const [id, list] = positional;
     if (id == null || list == null) return { error: "room members needs <roomId> and <a,b,...>" };
     return control("room.set-members", { id, memberIds: list.split(",").map((s) => s.trim()).filter((s) => s.length > 0) });
   }
-  return { error: "usage: herdr-bot room <create|members>" };
+  return { error: "usage: herdr-bot room <create|members>\nexample: herdr-bot room create review --members atlas,scout --dir ~/work/shop" };
 }
 
 function nonEmptyEnv(value: string | undefined): string | null {

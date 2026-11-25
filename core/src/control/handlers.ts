@@ -119,7 +119,7 @@ async function botDelete(host: Host, params: Params): Promise<unknown> {
 }
 
 function roomCreate(host: Host, params: Params): unknown {
-  const room = host.roster.createRoom({ name: requireString(params, "name"), ...(optionalString(params, "description") == null ? {} : { description: optionalString(params, "description")! }), memberIds: optionalStringArray(params, "memberIds") ?? [] });
+  const room = host.roster.createRoom({ name: requireString(params, "name"), ...(optionalString(params, "description") == null ? {} : { description: optionalString(params, "description")! }), memberIds: optionalStringArray(params, "memberIds") ?? [], ...(optionalString(params, "directory") == null ? {} : { directory: optionalString(params, "directory")! }) });
   host.chat.emitRoster();
   return requireSummary(host, room.id);
 }
@@ -163,6 +163,7 @@ const ROSTER_ERROR_CODES: Readonly<Record<RosterErrorCode, ControlErrorCode>> = 
   bot_not_ready: "invalid_params",
   missing_cwd: "invalid_params",
   home_cwd_requires_confirmation: "invalid_params",
+  invalid_directory: "invalid_params",
 };
 
 function rethrow(error: unknown): never {

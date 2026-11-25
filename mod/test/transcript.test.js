@@ -69,3 +69,11 @@ test("only a pending single-choice card is answerable with one click", () => {
   assert.equal(isOneClickPrompt(card({ prompt: { question: "Q", multiSelect: false, options: [] } })), false);
   assert.equal(isOneClickPrompt(entryView(e("m", 1))), false);
 });
+
+test("an approval card knows which bot asked, so an answer in a room goes to that bot", () => {
+  const card = entryView({ id: "p", seq: 4, timestampMs: 0, kind: "prompt", status: "pending", author: { id: "nova", name: "Nova" }, prompt: { question: "Run it?", options: [{ key: "1", label: "Yes" }] } });
+  assert.deepEqual([card.role, card.author, card.botId], ["prompt", "Nova", "nova"]);
+  const anonymous = entryView({ id: "q", seq: 5, timestampMs: 0, kind: "prompt", status: "pending", prompt: { question: "?" } });
+  assert.deepEqual([anonymous.author, anonymous.botId], [null, null]);
+  assert.equal(entryView({ id: "r", seq: 6, timestampMs: 0, kind: "prompt", author: { name: "No id" }, prompt: {} }).botId, null);
+});

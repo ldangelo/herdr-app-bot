@@ -109,3 +109,14 @@ test("every turn prompt restates the bot's current name, label and persona so a 
   assert.ok(!bare.includes("persona:"));
   assert.ok(bare.includes('"title":"","description":""'));
 });
+
+test("a room turn prompt tells the bot the room's working directory, and says nothing when there is none", () => {
+  const member = { id: "atlas", name: "Atlas", description: "" };
+  const build = (directory?: string | null) => buildRoomTurnPrompt({ room: { id: "room-x-1", name: "x", description: "Ship it", ...(directory === undefined ? {} : { directory }) }, member, peers: [], newMessages: [], cliPath: "/c/herdr-bot" });
+  const withDir = build("/work/shop");
+  assert.match(withDir, /Room working directory: \/work\/shop\./);
+  assert.match(withDir, /cd into it, or use absolute paths/);
+  assert.ok(withDir.indexOf("Room goal: Ship it") < withDir.indexOf("Room working directory"), "after the goal, before the messages");
+  for (const none of [undefined, null, "", "   "]) assert.ok(!build(none).includes("Room working directory"), JSON.stringify(none));
+  assert.ok(!buildDmTurnPrompt({ bot: member, chatId: "atlas", userName: "ray", newMessages: [], cliPath: "/c/herdr-bot" }).includes("working directory"), "a DM has no room directory");
+});

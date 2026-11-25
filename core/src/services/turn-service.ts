@@ -366,8 +366,8 @@ export class TurnService {
     }
   }
 
-  #roomIdentity(chatId: string): { id: string; name: string; description: string } {
+  #roomIdentity(chatId: string): { id: string; name: string; description: string; directory: string | null } {
     const summary = this.#deps.chat.summary(chatId);
-    return { id: chatId, name: summary?.name ?? chatId, description: summary?.description ?? "" };
+    return { id: chatId, name: summary?.name ?? chatId, description: summary?.description ?? "", directory: summary?.directory ?? null };
   }
 }

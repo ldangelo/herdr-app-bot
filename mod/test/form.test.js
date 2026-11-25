@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PROVIDERS as RENDERER_PROVIDERS } from "../../renderer/src/features/dialogs/provider-catalog.ts";
 import { missingLaunchChoices } from "../../core/src/bots/launch-args.ts";
-import { DEFAULT_REASONING, PROVIDERS, adoptParams, canCreate, createParams, describeError, initialForm, missingChoices, providerById, withProvider } from "../herdr-bot/form.js";
+import { DEFAULT_REASONING, PROVIDERS, adoptParams, canCreate, createParams, describeError, initialForm, missingChoices, providerById, roleParams, withProvider } from "../herdr-bot/form.js";
 
 test("the mod offers exactly the renderer's providers, with the same launch capabilities", () => {
   assert.deepEqual(PROVIDERS, RENDERER_PROVIDERS.map(({ id, label, supportsModel, supportsReasoning }) => ({ id, label, supportsModel, supportsReasoning })));
@@ -22,7 +22,7 @@ test("missingChoices agrees with the host's missingLaunchChoices for every provi
 
 test("a fresh form follows the host's defaults and preselects a reasoning level only where it applies", () => {
   const form = initialForm({ cwd: "/work/shop", provider: "codex", permissionMode: "auto" });
-  assert.deepEqual(form, { provider: "codex", model: null, reasoningEffort: DEFAULT_REASONING, name: "", cwd: "/work/shop", permissionMode: "auto", allowHomeCwd: false });
+  assert.deepEqual(form, { provider: "codex", model: null, reasoningEffort: DEFAULT_REASONING, name: "", role: "", persona: "", cwd: "/work/shop", permissionMode: "auto", allowHomeCwd: false });
   assert.equal(initialForm({ provider: "agy" }).reasoningEffort, null);
   assert.equal(initialForm({ provider: "not-offered" }).provider, "claude", "a provider the picker does not offer falls back");
   assert.equal(initialForm({}).permissionMode, "ask");
@@ -73,4 +73,18 @@ test("API errors become sentences a person can act on", () => {
   assert.equal(describeError({ message: "plain" }), "plain");
   assert.equal(describeError(undefined), "Something went wrong.");
   assert.equal(providerById("claude").label, "Claude Code");
+});
+
+test("a role is the bot's title and, optionally, its persona, sent only when filled in", () => {
+  assert.deepEqual(roleParams({ role: "  Code reviewer ", persona: " Finds bugs. " }), { title: "Code reviewer", description: "Finds bugs." });
+  assert.deepEqual(roleParams({ role: "Reviewer", persona: "  " }), { title: "Reviewer" });
+  assert.deepEqual(roleParams({ role: "", persona: "Just a persona" }), { description: "Just a persona" });
+  assert.deepEqual(roleParams({ role: "  ", persona: "" }), {});
+  assert.deepEqual(roleParams({}), {});
+  const form = { ...initialForm({ cwd: "/work", provider: "claude" }), name: "Atlas", model: "opus", reasoningEffort: "high", role: "Code reviewer", persona: "Finds bugs." };
+  assert.deepEqual(createParams(form), { name: "Atlas", provider: "claude", cwd: "/work", permissionMode: "ask", title: "Code reviewer", description: "Finds bugs.", model: "opus", reasoningEffort: "high" });
+  assert.equal("title" in createParams({ ...form, role: "" }), false, "no role, no title");
+  assert.deepEqual(adoptParams({ paneId: "t7" }, " Scout ", { role: "Researcher" }), { name: "Scout", adoptPaneId: "t7", title: "Researcher" });
+  assert.deepEqual(adoptParams({ paneId: "t7" }, "Scout"), { name: "Scout", adoptPaneId: "t7" });
+  assert.match(describeError({ code: "invalid_directory", message: "bad" }), /not usable: bad/);
 });

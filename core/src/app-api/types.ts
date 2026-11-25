@@ -93,6 +93,9 @@ export interface ChatSummary {
   readonly isHiddenFromSidebar: boolean;
   readonly isGroup: boolean;
   readonly memberIds: readonly string[];
+  /** A room's shared working folder: its bots are told to work there. Null for a bot DM and for a room without one;
+   * absent from a host that predates the field. */
+  readonly directory?: string | null;
   readonly bot: BotFacts | null;
 }
 
@@ -184,6 +187,8 @@ export interface CreateBotParams {
   readonly name: string;
   readonly id?: string;
   readonly description?: string;
+  /** The bot's role: a short label shown under its name and told to the bot. */
+  readonly title?: string;
   /** Required unless adopting (`adoptPaneId`), as are `model`/`reasoningEffort` whenever the provider
    * supports choosing them -- see `requireNewBotLaunch`. */
   readonly provider?: string;
@@ -241,8 +246,10 @@ export interface AppApiMethods {
   "bot.listModels": { params: { readonly provider: string }; result: ModelCatalogResult };
   "bot.defaults": { params: void; result: BotDefaults };
 
-  "room.create": { params: { readonly name: string; readonly description?: string; readonly memberIds: readonly string[]; readonly requestId?: string }; result: { readonly chat: ChatSummary } };
+  "room.create": { params: { readonly name: string; readonly description?: string; readonly memberIds: readonly string[]; readonly directory?: string; readonly allowHomeCwd?: boolean; readonly requestId?: string }; result: { readonly chat: ChatSummary } };
   "room.setMembers": { params: { readonly roomId: string; readonly memberIds: readonly string[] }; result: ChatSummary | null };
+  /** `directory: null` clears it. Like a bot's folder, the home directory needs `allowHomeCwd`. */
+  "room.setDirectory": { params: { readonly roomId: string; readonly directory: string | null; readonly allowHomeCwd?: boolean }; result: ChatSummary | null };
 
   "prompt.answer": {
     params: { readonly botId: string; readonly signature: string; readonly action: "option" | "text" | "next" | "cancel"; readonly key?: string; readonly text?: string };
@@ -307,6 +314,7 @@ export type AppApiErrorCode =
   | "bot_not_ready"
   | "missing_cwd"
   | "home_cwd_requires_confirmation"
+  | "invalid_directory"
   | "not_blocked"
   | "prompt_changed"
   | "invalid_answer"

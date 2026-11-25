@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { test } from "node:test";
 import { createHost } from "../../src/host.ts";
 import { resolveConfig } from "../../src/config.ts";
@@ -314,6 +316,42 @@ test("call() throws unknown_method for an unregistered method", async () => {
       assert.equal(error.code, "unknown_method");
       return true;
     });
+  } finally {
+    await h.cleanup();
+  }
+});
+
+test("rooms have a working directory (room.create, room.setDirectory, chat.list) and bots can be given a role", async () => {
+  const h = await harness();
+  try {
+    await h.call("bot.create", { provider: "claude", model: "opus", reasoningEffort: "high", name: "Reviewer", id: "reviewer", title: "  Code reviewer ", description: "Finds bugs." });
+    const events: AppApiEvent[] = [];
+    h.server.subscribe((event) => events.push(event));
+    const listed = (await h.call("chat.list")) as { id: string; title: string; directory: string | null }[];
+    assert.equal(listed.find((chat) => chat.id === "reviewer")?.title, "Code reviewer", "the role is the bot's title");
+    assert.equal(listed.find((chat) => chat.id === "reviewer")?.directory, null);
+
+    const dir = h.temp.home;
+    const made = await h.call("room.create", { name: "Shop", memberIds: ["reviewer"], directory: dir });
+    assert.equal(made.chat.directory, resolve(dir));
+    assert.equal(made.chat.kind, "room");
+    assert.equal((await h.call("room.create", { name: "Plain", memberIds: ["reviewer"] })).chat.directory, null);
+
+    // setDirectory changes it, pushes the change, and null clears it.
+    mkdirSync(`${dir}/work`);
+    const changed = await h.call("room.setDirectory", { roomId: made.chat.id, directory: `${dir}/work` });
+    assert.equal(changed.directory, `${dir}/work`);
+    assert.ok(events.some((event) => event.type === "chat.changed" && (event.payload as { id: string; directory: string | null }).directory === `${dir}/work`), "the change is pushed");
+    assert.equal((await h.call("room.setDirectory", { roomId: made.chat.id, directory: null })).directory, null);
+    assert.equal(await h.call("room.setDirectory", { roomId: "room-ghost", directory: null }), null);
+
+    await expectError(h.call("room.setDirectory", { roomId: made.chat.id }), "invalid_args");
+    await expectError(h.call("room.setDirectory", { roomId: made.chat.id, directory: 5 }), "invalid_args");
+    await expectError(h.call("room.setDirectory", { roomId: made.chat.id, directory: "relative" }), "invalid_directory");
+    await expectError(h.call("room.setDirectory", { roomId: made.chat.id, directory: `${dir}/missing` }), "invalid_directory");
+    await expectError(h.call("room.create", { name: "Bad", memberIds: ["reviewer"], directory: "nope" }), "invalid_directory");
+    await expectError(h.call("room.setDirectory", { roomId: made.chat.id, directory: homedir() }), "home_cwd_requires_confirmation");
+    assert.equal((await h.call("room.setDirectory", { roomId: made.chat.id, directory: homedir(), allowHomeCwd: true })).directory, resolve(homedir()));
   } finally {
     await h.cleanup();
   }

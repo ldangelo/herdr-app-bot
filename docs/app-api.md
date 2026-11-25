@@ -145,10 +145,12 @@ format. Common `kind`s:
 | `bot.listModels` | `{ provider: string }` | `ModelCatalogResult` |
 | `bot.defaults` | `void` | `BotDefaults` -- `{ cwd, provider, permissionMode, homeDir }`, for the New Bot dialog |
 
-`CreateBotParams`: `{ name, id?, description?, provider?, cwd?, permissionMode?, model?, reasoningEffort?,
+`CreateBotParams`: `{ name, id?, description?, title?, provider?, cwd?, permissionMode?, model?, reasoningEffort?,
 avatarShape?, avatarColor?, adoptPaneId?, allowHomeCwd? }`. Set `adoptPaneId` to adopt an existing herdr
 pane as this bot instead of spawning a new one (an adopted bot has no `bot.updateLaunchSettings` of its
 own after that).
+
+A bot's **role** is its `title` (a short label shown under its name, e.g. `Code reviewer`) plus, optionally, its `description` (its persona). Both are written into the bot's own prompts (`You are "Atlas" — Code reviewer. Your persona: …`), so a role shapes what the bot does, in rooms especially. Set them on `bot.create` or later with `chat.updateProfile`.
 
 Every new (non-adopted) bot states its launch choice explicitly: `provider` is required, and so are
 `model` (whenever the provider supports model selection) and `reasoningEffort` (whenever it supports a
@@ -174,8 +176,11 @@ prior mode of its own to keep.)
 
 | Method | Params | Result |
 |---|---|---|
-| `room.create` | `{ name, description?, memberIds: string[], requestId?: string }` | `{ chat: ChatSummary }` -- idempotent on a retried `requestId` |
+| `room.create` | `{ name, description?, memberIds: string[], directory?, allowHomeCwd?, requestId?: string }` | `{ chat: ChatSummary }` -- idempotent on a retried `requestId` |
 | `room.setMembers` | `{ roomId, memberIds: string[] }` | `ChatSummary \| null` |
+| `room.setDirectory` | `{ roomId, directory: string \| null, allowHomeCwd? }` | `ChatSummary \| null` -- `null` clears it |
+
+A room's **directory** is the folder its bots are told to work in: every room turn's prompt says `Room working directory: <path>. …`. It must be an absolute path to a folder that exists (`invalid_directory` otherwise) and, like a bot's folder, not the home directory unless `allowHomeCwd: true` (`home_cwd_requires_confirmation`). It is stored resolved and shows up as `ChatSummary.directory` (`null` for a bot DM and for a room without one). A bot's own folder is fixed when its agent starts, so this is an instruction to the bots, not something that moves them.
 
 Renaming/hiding/deleting a room reuses `chat.updateProfile` / `chat.setHidden` / `chat.delete`.
 
@@ -234,7 +239,7 @@ convention) rather than inventing a parallel vocabulary:
 - `invalid_args`, `unknown_method`, `internal` -- transport/protocol-level
 - `invalid_bot_id`, `bot_exists`, `unknown_bot`, `unknown_room`, `unknown_chat`, `too_many_members`,
   `unsupported_kind`, `invalid_launch_options`, `herdr_error`, `bot_not_ready`, `missing_cwd`,
-  `home_cwd_requires_confirmation` -- roster/bot/room errors
+  `home_cwd_requires_confirmation`, `invalid_directory` -- roster/bot/room errors
 - `not_blocked`, `prompt_changed`, `invalid_answer`, `answer_in_flight` -- `prompt.answer` errors
 
 ## Desktop extras (`window.herdrBot`)

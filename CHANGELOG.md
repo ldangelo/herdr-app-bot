@@ -10,6 +10,10 @@ All notable changes to herdr-bot are documented here. The format follows
 
 - Oh My Pi (`omp`) and Pi (`pi`) as AI providers, in the desktop app and in the herdr-app mod. They run on the
   model and thinking level configured in the CLI itself, so there is no model or reasoning choice for them.
+- Rooms have a working directory: the folder every bot in the room is told to work in (`room.create` `directory`,
+  `room.setDirectory`, `ChatSummary.directory`, `herdr-bot room create --dir`). It must be an absolute path to a folder
+  that exists, and not the home folder unless confirmed.
+- `bot.create` accepts a `title`, the bot's role (a short label under its name that the bot is also told).
 
 ## [1.3.0] - 2026-10-21
 

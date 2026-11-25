@@ -1,4 +1,5 @@
-import { basename } from "node:path";
+import { statSync } from "node:fs";
+import { basename, isAbsolute, resolve } from "node:path";
 import type { HostConfig } from "../config.ts";
 import { buildIdentityBrief } from "../bots/prompts.ts";
 import { REASONING_EFFORTS, isSupportedKind, launchArgsFor, missingLaunchChoices, providerLaunchCapabilities, type AgentLaunchOptions, type ReasoningEffort } from "../bots/launch-args.ts";
@@ -16,7 +17,7 @@ import { AppSettingsStore, type AppSettings } from "../store/app-settings-store.
 import { isHomeDirectory } from "./directory-browser.ts";
 import { WorkspaceRegistry } from "./workspace-registry.ts";
 
-export type RosterErrorCode = "invalid_bot_id" | "bot_exists" | "unknown_bot" | "unknown_room" | "too_many_members" | "unsupported_kind" | "invalid_launch_options" | "herdr_error" | "bot_not_ready" | "missing_cwd" | "home_cwd_requires_confirmation";
+export type RosterErrorCode = "invalid_bot_id" | "bot_exists" | "unknown_bot" | "unknown_room" | "too_many_members" | "unsupported_kind" | "invalid_launch_options" | "herdr_error" | "bot_not_ready" | "missing_cwd" | "home_cwd_requires_confirmation" | "invalid_directory";
 
 /** Outcome of provisioning a reserved (quick-created) bot's herdr agent. `needs_setup` means the pane
  * exists but its shell needs manual first-run setup in herdr before the agent can be prompted. */
@@ -39,6 +40,8 @@ export interface CreateBotArgs {
   readonly id?: string;
   readonly name: string;
   readonly description?: string;
+  /** The bot's role: a short label shown under its name and told to the bot ("You are Atlas — Code reviewer"). */
+  readonly title?: string;
   readonly kind?: string;
   readonly cwd?: string;
   readonly permissionMode?: PermissionMode;
@@ -123,6 +126,32 @@ export function requireNewBotLaunch(choice: Pick<CreateBotArgs, "kind" | "model"
   const kind = choice.kind!.trim();
   if (!isSupportedKind(kind)) throw new RosterError("unsupported_kind", `herdr does not support agent kind "${kind}"`);
   return { kind, ...normalizeLaunchOptions(kind, choice) };
+}
+
+/** A role label as a profile field: absent (not "") when empty, like `title` on profiles that never set one. */
+function roleTitle(title: string | undefined): { title?: string } {
+  const trimmed = title?.trim() ?? "";
+  return trimmed.length === 0 ? {} : { title: trimmed };
+}
+
+/**
+ * A room's working folder, checked before it is stored and told to every bot: an absolute path to a folder that
+ * exists, and (like a bot's folder) not the home directory unless that was confirmed. Returns the resolved path.
+ */
+function validRoomDirectory(raw: string, allowHomeCwd: boolean): string {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) throw new RosterError("invalid_directory", "a room's directory cannot be empty");
+  if (!isAbsolute(trimmed)) throw new RosterError("invalid_directory", `"${trimmed}" is not an absolute path`);
+  const directory = resolve(trimmed);
+  let isDirectory = false;
+  try {
+    isDirectory = statSync(directory).isDirectory();
+  } catch {
+    isDirectory = false;
+  }
+  if (!isDirectory) throw new RosterError("invalid_directory", `"${directory}" is not a folder that exists`);
+  if (isHomeDirectory(directory) && !allowHomeCwd) throw new RosterError("home_cwd_requires_confirmation", `"${directory}" is your home directory; pass allowHomeCwd to confirm using it`);
+  return directory;
 }
 
 export class RosterService {
@@ -336,7 +365,7 @@ export class RosterService {
     return next;
   }
 
-  createRoom(args: { readonly name: string; readonly description?: string; readonly memberIds: readonly string[]; readonly requestId?: string }): RoomConfig {
+  createRoom(args: { readonly name: string; readonly description?: string; readonly memberIds: readonly string[]; readonly directory?: string; readonly allowHomeCwd?: boolean; readonly requestId?: string }): RoomConfig {
     // Idempotency: a retried group-create submit (e.g. after a client timeout) carries the same
     // requestId, so this method must return the room already created instead of a duplicate --
     // checked before member revalidation, since a retry must succeed even if a member's status changed.
@@ -345,12 +374,14 @@ export class RosterService {
       if (existing != null) return existing;
     }
     const memberIds = this.#validMembers(args.memberIds);
+    const directory = args.directory == null ? null : validRoomDirectory(args.directory, args.allowHomeCwd === true);
     const now = this.#now();
     const room: RoomConfig = {
       id: makeRoomId(args.name),
       name: args.name.trim().length > 0 ? args.name.trim() : "New room",
       description: args.description ?? "",
       memberIds,
+      ...(directory == null ? {} : { directory }),
       isHiddenFromSidebar: false,
       createdAt: now,
       updatedAt: now,
@@ -364,6 +395,17 @@ export class RosterService {
     const room = this.#deps.rooms.get(id);
     if (room == null) return null;
     const next = { ...room, memberIds: this.#validMembers(memberIds), updatedAt: this.#now() };
+    this.#deps.rooms.save(next);
+    return next;
+  }
+
+  /** Sets the folder a room's bots are told to work in, or clears it with `null`. */
+  setRoomDirectory(id: string, directory: string | null, allowHomeCwd = false): RoomConfig | null {
+    const room = this.#deps.rooms.get(id);
+    if (room == null) return null;
+    const valid = directory == null ? null : validRoomDirectory(directory, allowHomeCwd);
+    const { directory: _previous, ...rest } = room;
+    const next: RoomConfig = { ...rest, ...(valid == null ? {} : { directory: valid }), updatedAt: this.#now() };
     this.#deps.rooms.save(next);
     return next;
   }
@@ -525,7 +567,7 @@ export class RosterService {
     const sessionId = await this.#startAgent(id, kind, location.paneId, launchArgs);
     const now = this.#now();
     return {
-      id, name: args.name.trim().length > 0 ? args.name.trim() : id, description: args.description ?? "", kind, cwd, permissionMode,
+      id, name: args.name.trim().length > 0 ? args.name.trim() : id, description: args.description ?? "", ...roleTitle(args.title), kind, cwd, permissionMode,
       model: launchOptions.model, reasoningEffort: launchOptions.reasoningEffort,
       avatarShape: args.avatarShape ?? null, avatarColor: args.avatarColor ?? randomAvatarColor(), adopted: false,
       herdr: { paneId: location.paneId, workspaceId: location.workspaceId, sessionId },
@@ -594,7 +636,7 @@ export class RosterService {
     }
     const now = this.#now();
     return {
-      id, name: args.name.trim().length > 0 ? args.name.trim() : id, description: args.description ?? "", kind: info.agent ?? "unknown", cwd: info.cwd ?? this.effectiveDefaultCwd() ?? "",
+      id, name: args.name.trim().length > 0 ? args.name.trim() : id, description: args.description ?? "", ...roleTitle(args.title), kind: info.agent ?? "unknown", cwd: info.cwd ?? this.effectiveDefaultCwd() ?? "",
       permissionMode: args.permissionMode ?? "ask", avatarShape: args.avatarShape ?? null, avatarColor: args.avatarColor ?? randomAvatarColor(), adopted: true,
       model: null, reasoningEffort: null,
       herdr: { paneId: info.pane_id, workspaceId: info.workspace_id, sessionId: info.agent_session?.value ?? null },
