@@ -149,3 +149,21 @@ test("a request can ask for a longer timeout than the default", async () => {
   socket.end();
   await pump;
 });
+
+test("open records the host's version from ready, or null when the host sends none", async () => {
+  const withVersion = fakeSocket();
+  withVersion.push(JSON.stringify({ op: "ready", version: "1.3.0" }));
+  const a = new AppApiClient({ connect: async () => withVersion, sleep: never });
+  await a.open({ port: 1, token: "t" });
+  assert.equal(a.hostVersion, "1.3.0");
+  const without = fakeSocket();
+  without.push(JSON.stringify({ op: "ready" }));
+  const b = new AppApiClient({ connect: async () => without, sleep: never });
+  await b.open({ port: 1, token: "t" });
+  assert.equal(b.hostVersion, null);
+  const odd = fakeSocket();
+  odd.push(JSON.stringify({ op: "ready", version: 7 }));
+  const c = new AppApiClient({ connect: async () => odd, sleep: never });
+  await c.open({ port: 1, token: "t" });
+  assert.equal(c.hostVersion, null, "only a string counts as a version");
+});

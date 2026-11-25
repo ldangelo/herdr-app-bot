@@ -6,7 +6,10 @@
 // same place as the binary, so the checksum guards against a damaged or truncated download, not against a compromised
 // source: the source itself is what is trusted.
 
-export const DEFAULT_SOURCE = "https://github.com/ldangelo/herdr-app-bot/releases/latest/download";
+import { REQUIRED_HOST_VERSION, sourceForVersion } from "./version.js";
+
+/** Where the host this mod needs is published: the release for exactly that version. */
+export const DEFAULT_SOURCE = sourceForVersion(REQUIRED_HOST_VERSION);
 
 export class HostUnavailableError extends Error {
   constructor(message) {

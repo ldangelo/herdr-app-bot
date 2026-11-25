@@ -7,6 +7,15 @@ export class HostMissingError extends Error {
   }
 }
 
+/** The host that answered is older than this mod needs (or a different major): it must be updated, not used. */
+export class HostOutdatedError extends Error {
+  constructor(message, hostVersion) {
+    super(message);
+    this.name = "HostOutdatedError";
+    this.hostVersion = hostVersion;
+  }
+}
+
 /**
  * @param {{ readEndpoint: () => Promise<{port:number, token:string} | null>,
  *           startHost: () => Promise<void>,

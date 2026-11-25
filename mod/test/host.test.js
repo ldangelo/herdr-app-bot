@@ -78,3 +78,11 @@ test("hc's refusal of a taken name means a host is already starting", () => {
   assert.equal(isHostAlreadyStarting({ code: 1, stderr: "hc: command not found", stdout: "" }), false);
   assert.equal(isHostAlreadyStarting({ code: 1, stderr: '{"error":{"kind":"invalid_params","message":"bad name"}}', stdout: "" }), false);
 });
+
+test("HostOutdatedError carries the version it found", async () => {
+  const { HostOutdatedError } = await import("../herdr-bot/host.js");
+  const error = new HostOutdatedError("too old", "1.2.0");
+  assert.equal(error.name, "HostOutdatedError");
+  assert.equal(error.hostVersion, "1.2.0");
+  assert.ok(error instanceof Error);
+});

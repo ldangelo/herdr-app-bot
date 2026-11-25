@@ -12,6 +12,8 @@ export class AppApiClient {
     this.onEvent = onEvent;
     this.requestTimeoutMs = requestTimeoutMs;
     this.socket = null;
+    /** The host's version from its `ready` message; null from a host that predates versions. */
+    this.hostVersion = null;
     this.nextId = 1;
     this.pending = new Map();
   }
@@ -28,6 +30,7 @@ export class AppApiClient {
       const first = await socket.read();
       const message = typeof first === "string" ? JSON.parse(first) : null;
       if (message?.op !== "ready") throw new Error("the host did not accept the connection");
+      this.hostVersion = typeof message.version === "string" ? message.version : null;
     } catch (error) {
       try { await socket.close(); } catch { /* already gone */ }
       throw error;

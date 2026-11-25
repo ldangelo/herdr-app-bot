@@ -6,6 +6,7 @@ import { ControlError } from "../../core/src/control/protocol.ts";
 import { createAppApiServer } from "../../core/src/app-api/server.ts";
 import { createHost } from "../../core/src/host.ts";
 import { log } from "../../core/src/log.ts";
+import { HOST_VERSION } from "../../core/src/version.ts";
 import { IdleExit } from "../../core/src/ws/idle-exit.ts";
 import { removeWsEndpoint, startAppApiWsServer, writeWsEndpoint } from "../../core/src/ws/server.ts";
 import { parseCliArgs, type CliCommand } from "./args.ts";
@@ -73,7 +74,7 @@ async function serve(options: { readonly ws: boolean; readonly exitWhenIdleSecon
       const graceMs = (options.exitWhenIdleSeconds ?? 0) * 1000;
       if (options.exitWhenIdleSeconds != null) idle = new IdleExit({ graceMs, onIdle: () => { log("cli", `no herdr-app client for ${options.exitWhenIdleSeconds}s; stopping`); stop(); } });
       api = createAppApiServer(host);
-      void startAppApiWsServer({ api, onClientCount: (count) => idle?.clients(count) }).then((server) => {
+      void startAppApiWsServer({ api, version: HOST_VERSION, onClientCount: (count) => idle?.clients(count) }).then((server) => {
         ws = server;
         writeWsEndpoint(config.home, { port: server.port, token: server.token, pid: process.pid });
         log("cli", `app API on ws://127.0.0.1:${server.port} (endpoint in ${config.home}/ws.json)`);

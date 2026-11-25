@@ -1,4 +1,5 @@
 /** Handlers for settings.*, directory.*, identity.get, and host.status. */
+import { HOST_VERSION } from "../../version.ts";
 import type { Host } from "../../host.ts";
 import { isSupportedKind } from "../../bots/launch-args.ts";
 import { isHomeDirectory, listDirectories } from "../../services/directory-browser.ts";
@@ -40,5 +41,5 @@ export function getIdentity(host: Host): { readonly userName: string } {
 
 export function getHostStatus(host: Host): HostStatusSummary {
   const status = host.status();
-  return { home: status.home, session: status.session, bots: status.bots, rooms: status.rooms, runningChatIds: status.runningTurns };
+  return { version: HOST_VERSION, home: status.home, session: status.session, bots: status.bots, rooms: status.rooms, runningChatIds: status.runningTurns };
 }

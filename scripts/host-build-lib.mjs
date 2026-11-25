@@ -37,3 +37,25 @@ export function mergeManifest(existing, version, key, asset) {
   const base = existing != null && existing.version === version && typeof existing.assets === "object" && existing.assets !== null ? existing : { version, assets: {} };
   return { version, assets: { ...base.assets, [key]: { file: asset.file, sha256: asset.sha256, size: asset.size } } };
 }
+
+/**
+ * Joins the manifests that separate build jobs each wrote (one platform apiece) into the one a release publishes.
+ * Every manifest must be for the same version and no platform may appear twice: either means two builds disagree about
+ * what is being released, and publishing a guess would pair a checksum with the wrong file.
+ */
+export function mergeManifests(manifests) {
+  if (manifests.length === 0) throw new Error("there are no manifests to merge");
+  const version = manifests[0].version;
+  let merged = null;
+  const seen = new Set();
+  for (const manifest of manifests) {
+    if (manifest.version !== version) throw new Error(`manifests disagree about the version (${version} and ${manifest.version})`);
+    for (const [key, asset] of Object.entries(manifest.assets ?? {})) {
+      if (seen.has(key)) throw new Error(`more than one build for ${key}`);
+      seen.add(key);
+      merged = mergeManifest(merged, version, key, asset);
+    }
+  }
+  if (merged == null) throw new Error("the manifests contain no assets");
+  return merged;
+}

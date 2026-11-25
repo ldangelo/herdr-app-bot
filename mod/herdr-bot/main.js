@@ -8,8 +8,9 @@ import { appHome, checking, exec, hc, home, props, readTextFile, theme } from "h
 import { arch, platform } from "os";
 import { WebSocket } from "websocket";
 import { AppApiClient } from "./client.js";
-import { HostMissingError, connectToHost, hostLaunchArgs, isHostAlreadyStarting } from "./host.js";
+import { HostMissingError, HostOutdatedError, connectToHost, hostLaunchArgs, isHostAlreadyStarting } from "./host.js";
 import { DEFAULT_SOURCE, describeSize, installHost, planInstall } from "./install.js";
+import { describeVersionGap, isHostCurrent } from "./version.js";
 import { applyEvent, statusOf, summarize, visibleChats } from "./state.js";
 import { NewBot } from "./newbot.js";
 import { applyTranscriptEvent, isOneClickPrompt, isSeqGap, lastSeq, mergeEntries, visibleEntries } from "./transcript.js";
@@ -71,6 +72,7 @@ const PHASE_TEXT = {
   starting: "Starting the herdr-bot host…",
   disconnected: "Lost the host. Reconnecting…",
   installing: "Installing the herdr-bot host…",
+  outdated: "The herdr-bot host needs updating.",
 };
 
 const INSTALL_STEPS = { manifest: "Checking what to download…", download: "Downloading the herdr-bot host…", verify: "Verifying the download…", install: "Installing…" };
@@ -88,6 +90,8 @@ export default class HerdrBot extends View {
     this.installPlan = null;
     this.installStep = null;
     this.installError = null; // survives reconnect attempts, which reset `error`
+    this.outdated = null; // { have, gap } while the running host is older than this mod needs
+    this.updatedOnce = false;
     this.lastEventSeq = null;
     // The open chat, if any: its entries, and what the composer and scroll position are doing.
     // `props.chat` opens straight into that chat (a tab or palette entry can ask for one).
@@ -140,6 +144,7 @@ export default class HerdrBot extends View {
     let backoff = 1000;
     while (this.alive) {
       let fatal = false;
+      let outdated = false;
       try {
         this.phase = "connecting";
         this.error = null;
@@ -163,6 +168,12 @@ export default class HerdrBot extends View {
             cx.notify();
           },
         });
+        // The host says which version it is when we connect: an older one gets an update prompt, not half-working screens.
+        if (!isHostCurrent(client.hostVersion)) {
+          await client.close();
+          throw new HostOutdatedError(describeVersionGap(client.hostVersion), client.hostVersion);
+        }
+        this.outdated = null;
         this.client = client;
         this.lastEventSeq = null;
         backoff = 1000;
@@ -177,9 +188,15 @@ export default class HerdrBot extends View {
         await pump;
         this.phase = "disconnected";
       } catch (error) {
-        fatal = error instanceof HostMissingError;
+        outdated = error instanceof HostOutdatedError && !this.updatedOnce;
+        fatal = error instanceof HostMissingError || outdated;
         this.error = String((error && error.message) || error);
-        this.phase = fatal ? "missing" : "error";
+        if (error instanceof HostOutdatedError) {
+          this.outdated = { have: error.hostVersion, gap: error.message };
+          // Already updated once and still old: a different host process is answering. Say so instead of asking again.
+          if (this.updatedOnce) this.error = `${error.message} It is still old after updating: another herdr-bot host may be running. Stop it and reopen this view.`;
+        }
+        this.phase = outdated ? "outdated" : fatal ? "missing" : "error";
       }
       this.client = null;
       cx.notify();
@@ -188,8 +205,9 @@ export default class HerdrBot extends View {
         this.installPlan = await planInstall({ source, platform: platform(), arch: arch(), fetchText }).catch((error) => ({ ok: false, reason: String(error.message ?? error) }));
         cx.notify();
         this.retryRequested = false;
-        // (It also stops waiting if the host appears some other way: another copy of this mod installed it.)
-        while (this.alive && !this.retryRequested && !this.installRequested && !(await isRunnable(`${botHome}/bin/herdr-bot`))) await cx.sleep(300);
+        // A missing host also stops the wait if it appears some other way (another copy of this mod installed it); an
+        // outdated one is there already, so it waits only for the person.
+        while (this.alive && !this.retryRequested && !this.installRequested && (outdated || !(await isRunnable(`${botHome}/bin/herdr-bot`)))) await cx.sleep(300);
         if (this.alive && this.installRequested && this.installPlan.ok) {
           this.installRequested = false;
           this.phase = "installing";
@@ -198,9 +216,15 @@ export default class HerdrBot extends View {
           cx.notify();
           try {
             await installHost({ source, botHome, platform: platform(), arch: arch(), fetchText, exec: run, onStep: (step) => { this.installStep = INSTALL_STEPS[step]; cx.notify(); } });
+            if (outdated) {
+              // The old host still runs the old program in memory: stop it (the bots keep running) so the next connect starts the new one.
+              this.updatedOnce = true;
+              await hc(["kill", "herdr-bot-host"]).catch(() => {});
+              await hc(["rm", "herdr-bot-host"]).catch(() => {});
+            }
           } catch (error) {
             this.installError = String((error && error.message) || error);
-            this.phase = "missing";
+            this.phase = outdated ? "outdated" : "missing";
           }
           this.installStep = null;
         }
@@ -376,21 +400,24 @@ export default class HerdrBot extends View {
       .when(Boolean(action), (el) => el.child(this.button(t, "notice-action", action, true, onAction)));
   }
 
-  /** The host program is not installed: say what a download is, and let the person decide. */
+  /** The host program is missing, or too old: say what a download is, and let the person decide. */
   missingView(t) {
     const plan = this.installPlan;
+    const outdated = this.phase === "outdated";
+    const heading = outdated ? "The herdr-bot host needs updating" : "herdr-bot needs its host program";
     const again = (_event, cx) => {
       this.retryRequested = true;
       cx.notify();
     };
-    if (plan == null) return this.notice(t, "herdr-bot needs its host program", "Checking where to get it…");
-    if (!plan.ok) return this.notice(t, "herdr-bot cannot be installed here", plan.reason, "Check again", again);
+    if (plan == null) return this.notice(t, heading, "Checking where to get it…");
+    if (!plan.ok) return this.notice(t, outdated ? heading : "herdr-bot cannot be installed here", plan.reason, "Check again", again);
     const where = (() => { try { return new URL(this.source).host; } catch { return this.source; } })();
+    const lead = `Download ${describeSize(plan.size)} from ${where}${plan.version ? ` (version ${plan.version})` : ""}. It is checked against its checksum, then run on this computer.`;
     return this.notice(
       t,
-      "herdr-bot needs its host program",
-      this.installError ?? `Download ${describeSize(plan.size)} from ${where}${plan.version ? ` (version ${plan.version})` : ""}. It is checked against its checksum, then run on this computer.`,
-      this.installError ? "Try again" : "Download",
+      heading,
+      this.installError ?? (outdated ? `${this.outdated?.gap ?? ""} ${lead}`.trim() : lead),
+      this.installError ? "Try again" : outdated ? "Update" : "Download",
       (_event, cx) => {
         this.installRequested = true;
         this.installError = null;
@@ -513,7 +540,7 @@ export default class HerdrBot extends View {
     const counts = summarize(this.chats);
     let body;
     if (this.phase === "ready") body = this.selected != null ? this.chatView(t) : this.screen === "new-bot" ? this.newBot.render(t) : this.listView(t);
-    else if (this.phase === "missing") body = this.missingView(t);
+    else if (this.phase === "missing" || this.phase === "outdated") body = this.missingView(t);
     else if (this.phase === "installing") body = this.notice(t, this.installStep ?? PHASE_TEXT.installing, "This runs once. The file is checked before it is used.");
     else if (this.phase === "error") body = this.notice(t, "Cannot reach herdr-bot", this.error);
     else body = this.notice(t, PHASE_TEXT[this.phase] ?? "Connecting…");

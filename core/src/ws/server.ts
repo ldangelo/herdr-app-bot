@@ -5,7 +5,7 @@
  *
  * Protocol, one JSON object per text message:
  *   client -> server   {"op":"auth","token":"..."}                      must be first, within `authTimeoutMs`
- *   server -> client   {"op":"ready"}                                   events follow
+ *   server -> client   {"op":"ready","version":"1.3.0"}                    the host's version; events follow
  *   client -> server   {"id":1,"method":"chat.list","params":{}}
  *   server -> client   {"id":1,"result":...}  |  {"id":1,"error":{"code":"...","message":"..."}}
  *   server -> client   {"op":"event","event":{"seq":N,"type":"...","payload":...}}
@@ -36,6 +36,8 @@ export interface WsServerOptions {
   readonly port?: number;
   readonly authTimeoutMs?: number;
   readonly maxMessageBytes?: number;
+  /** Sent to each client in `ready`, so it can tell whether this host is new enough for it. */
+  readonly version?: string;
   /** Called with the number of authenticated clients whenever it changes. */
   readonly onClientCount?: (count: number) => void;
 }
@@ -103,7 +105,7 @@ export async function startAppApiWsServer(options: WsServerOptions): Promise<WsS
         clearTimeout(authTimer);
         authenticated.add(socket);
         unsubscribe = options.api.subscribe((event) => send({ op: "event", event }));
-        send({ op: "ready" });
+        send({ op: "ready", ...(options.version == null ? {} : { version: options.version }) });
         announce();
         return;
       }

@@ -222,3 +222,20 @@ test("the endpoint file is private, atomic and only removed by its owner", () =>
     temp.cleanup();
   }
 });
+
+test("ready carries the host's version when one is given, so a client can check it is new enough", async () => {
+  const fake = fakeApi();
+  const server = await startAppApiWsServer({ api: fake.api, version: "1.4.2" });
+  try {
+    const client = new Client(server);
+    await client.authenticate(server);
+    assert.deepEqual(client.messages.find((message) => message.op === "ready"), { op: "ready", version: "1.4.2" });
+    const plain = await startAppApiWsServer({ api: fake.api });
+    const other = new Client(plain);
+    await other.authenticate(plain);
+    assert.deepEqual(other.messages.find((message) => message.op === "ready"), { op: "ready" });
+    await plain.close();
+  } finally {
+    await server.close();
+  }
+});

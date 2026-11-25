@@ -37,6 +37,14 @@ const built = spawnSync("bun", ["build", join(root, "cli/src/main.ts"), "--compi
 if (built.error != null) throw new Error(`could not run bun (${built.error.message}); install it from https://bun.sh`);
 if (built.status !== 0) process.exit(built.status ?? 1);
 
+// A macOS executable must carry at least an ad-hoc signature (Apple silicon refuses to run an unsigned one), and bun
+// does not sign a build for a different CPU. Signing is idempotent, and has to happen before the checksum is taken.
+if (key.startsWith("darwin-")) {
+  if (process.platform !== "darwin") throw new Error(`a ${key} host can only be built on macOS: it has to be code-signed`);
+  const signed = spawnSync("codesign", ["--force", "--sign", "-", binary], { stdio: "inherit" });
+  if (signed.status !== 0) process.exit(signed.status ?? 1);
+}
+
 const digest = await sha256(binary);
 writeFileSync(`${binary}.sha256`, `${digest}  ${file}\n`);
 const manifestPath = join(out, "manifest.json");
