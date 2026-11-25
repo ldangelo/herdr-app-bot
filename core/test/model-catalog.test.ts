@@ -9,7 +9,9 @@ import {
   listBotModels,
   parseAgyModelsOutput,
   parseGrokModelsOutput,
+  parseOmpModelsOutput,
   parseOpencodeModelsOutput,
+  parsePiModelsOutput,
   projectCodexModels,
   type CodexChildProcess,
   type ModelCatalog,
@@ -102,6 +104,33 @@ test("parseOpencodeModelsOutput reads one provider/model id per line and dedups"
     { id: "github-copilot/claude-opus-4.8", label: "github-copilot/claude-opus-4.8" },
     { id: "openai/gpt-5.4", label: "openai/gpt-5.4" },
   ]);
+});
+
+test("parsePiModelsOutput reads provider and model columns as provider/model and skips the header", () => {
+  const stdout = ["provider       model              context  max-out  thinking  images", "anthropic      claude-fable-5     1M       128K     yes       yes   ", "anthropic      claude-fable-5     1M       128K     yes       yes   ", "openai         gpt-5.4            400K     128K     yes       yes   ", ""].join("\n");
+  assert.deepEqual(parsePiModelsOutput(stdout), [
+    { id: "anthropic/claude-fable-5", label: "anthropic/claude-fable-5" },
+    { id: "openai/gpt-5.4", label: "openai/gpt-5.4" },
+  ]);
+});
+
+test("parseOmpModelsOutput reads each provider's boxed table as provider/model and skips borders and headers", () => {
+  const stdout = [
+    "anthropic (2)",
+    "┌────────────────┬─────────┐",
+    "│ model          │ context │",
+    "├────────────────┼─────────┤",
+    "│ claude-fable-5 │      1M │",
+    "│ claude-haiku-4 │    200K │",
+    "└────────────────┴─────────┘",
+    "",
+    "openai-codex (1)",
+    "│ model   │ context │",
+    "│ gpt-5.4 │   400K  │",
+    "",
+  ].join("\n");
+  assert.deepEqual(parseOmpModelsOutput(stdout).map((m) => m.id), ["anthropic/claude-fable-5", "anthropic/claude-haiku-4", "openai-codex/gpt-5.4"]);
+  assert.deepEqual(parseOmpModelsOutput("no tables here"), []);
 });
 
 test("projectCodexModels maps the app-server Model schema, falls back id -> model, and dedups", () => {

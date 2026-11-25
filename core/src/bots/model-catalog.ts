@@ -99,6 +99,44 @@ export function parseOpencodeModelsOutput(stdout: string): ModelEntry[] {
 }
 
 /**
+ * `pi --list-models` prints a whitespace-aligned table, a header row first, then one `provider model ...` row per
+ * model. Both CLIs take `provider/model` for `--model`, so that is the id.
+ */
+export function parsePiModelsOutput(stdout: string): ModelEntry[] {
+  const entries: ModelEntry[] = [];
+  for (const rawLine of stdout.split("\n")) {
+    const [provider, model] = rawLine.trim().split(/\s+/);
+    if (provider == null || model == null || (provider === "provider" && model === "model")) continue;
+    entries.push({ id: `${provider}/${model}`, label: `${provider}/${model}` });
+  }
+  return dedupById(entries);
+}
+
+/**
+ * `omp models ls` prints one boxed table per provider, each under a `provider (count)` heading:
+ *   anthropic (21)
+ *   │ model            │ context │ ...
+ *   │ claude-fable-5   │ 1M      │ ...
+ * The id is `provider/model`. Borders and the column header are skipped.
+ */
+export function parseOmpModelsOutput(stdout: string): ModelEntry[] {
+  const entries: ModelEntry[] = [];
+  let provider: string | null = null;
+  for (const rawLine of stdout.split("\n")) {
+    const heading = /^([A-Za-z0-9._-]+) \(\d+\)\s*$/.exec(rawLine);
+    if (heading != null) {
+      provider = heading[1] ?? null;
+      continue;
+    }
+    const row = /^│\s*([^\s│]+)\s*│/.exec(rawLine);
+    const model = row?.[1];
+    if (provider == null || model == null || model === "model") continue;
+    entries.push({ id: `${provider}/${model}`, label: `${provider}/${model}` });
+  }
+  return dedupById(entries);
+}
+
+/**
  * Projects Codex app-server's `model/list` result entries (the `Model` shape from the app-server
  * protocol schema: `{ id, model, displayName, hidden, ... }`) to the catalog's plain `{id, label}`.
  * `hidden` models are not filtered here -- the request already omits `includeHidden`, so the server
@@ -409,6 +447,10 @@ async function queryProvider(kind: string, deps: ModelCatalogDeps, getSpawnEnv: 
       return queryOneShotList("agy", "agy", ["models"], parseAgyModelsOutput, deps, getSpawnEnv);
     case "opencode":
       return queryOneShotList("opencode", "opencode", ["models"], parseOpencodeModelsOutput, deps, getSpawnEnv);
+    case "pi":
+      return queryOneShotList("pi", "pi", ["--list-models"], parsePiModelsOutput, deps, getSpawnEnv);
+    case "omp":
+      return queryOneShotList("omp", "omp", ["models", "ls"], parseOmpModelsOutput, deps, getSpawnEnv);
     case "codex":
       return queryCodex(deps, getSpawnEnv);
     case "claude":

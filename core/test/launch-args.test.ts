@@ -58,13 +58,14 @@ test("provider capabilities reject unsupported reasoning", () => {
   );
 });
 
-test("pi and omp (Oh My Pi) are supported kinds that take neither a model nor a reasoning level, and launch with no extra flags", () => {
+test("pi and omp (Oh My Pi) take an optional model and no reasoning level, and launch with the model when one is picked", () => {
   for (const kind of ["pi", "omp"]) {
     assert.equal(isSupportedKind(kind), true, kind);
-    assert.deepEqual(providerLaunchCapabilities(kind), { model: false, reasoning: false }, kind);
-    assert.deepEqual(missingLaunchChoices({ kind }), [], `${kind} needs no model or effort chosen`);
+    assert.deepEqual(providerLaunchCapabilities(kind), { model: true, reasoning: false }, kind);
+    assert.deepEqual(missingLaunchChoices({ kind }), [], `${kind} runs its own configured model when none is chosen`);
     for (const mode of ["ask", "auto"] as const) assert.deepEqual(launchArgsFor(kind, mode, cli), [], `${kind} ${mode}`);
-    assert.throws(() => launchArgsFor(kind, "ask", cli, { model: "some-model", reasoningEffort: null }), /does not support model selection/);
+    assert.deepEqual(launchArgsFor(kind, "ask", cli, { model: "anthropic/claude-fable-5", reasoningEffort: null }), ["--model", "anthropic/claude-fable-5"], kind);
     assert.throws(() => launchArgsFor(kind, "ask", cli, { model: null, reasoningEffort: "high" }), /does not support reasoning effort/);
   }
+  assert.deepEqual(missingLaunchChoices({ kind: "opencode" }), ["model"], "other providers still require one");
 });

@@ -5,7 +5,13 @@ import { missingLaunchChoices } from "../../core/src/bots/launch-args.ts";
 import { DEFAULT_REASONING, PROVIDERS, adoptParams, canCreate, createParams, describeError, initialForm, missingChoices, providerById, roleParams, withProvider } from "../herdr-bot/form.js";
 
 test("the mod offers exactly the renderer's providers, with the same launch capabilities", () => {
-  assert.deepEqual(PROVIDERS, RENDERER_PROVIDERS.map(({ id, label, supportsModel, supportsReasoning }) => ({ id, label, supportsModel, supportsReasoning })));
+  // Pi and Oh My Pi take an optional model here; the desktop app's picker does not offer one yet.
+  const modelOptional = new Set(PROVIDERS.filter((p) => p.modelOptional).map((p) => p.id));
+  assert.deepEqual([...modelOptional].sort(), ["omp", "pi"]);
+  assert.deepEqual(
+    PROVIDERS.map(({ id, label, supportsModel, supportsReasoning }) => ({ id, label, supportsModel: supportsModel && !modelOptional.has(id), supportsReasoning })),
+    RENDERER_PROVIDERS.map(({ id, label, supportsModel, supportsReasoning }) => ({ id, label, supportsModel, supportsReasoning })),
+  );
 });
 
 test("missingChoices agrees with the host's missingLaunchChoices for every provider and combination", () => {
@@ -87,4 +93,15 @@ test("a role is the bot's title and, optionally, its persona, sent only when fil
   assert.deepEqual(adoptParams({ paneId: "t7" }, " Scout ", { role: "Researcher" }), { name: "Scout", adoptPaneId: "t7", title: "Researcher" });
   assert.deepEqual(adoptParams({ paneId: "t7" }, "Scout"), { name: "Scout", adoptPaneId: "t7" });
   assert.match(describeError({ code: "invalid_directory", message: "bad" }), /not usable: bad/);
+});
+
+test("pi and omp take an optional model: none is missing, and one picked is sent", () => {
+  for (const provider of ["pi", "omp"]) {
+    assert.deepEqual(missingChoices({ provider, model: null, reasoningEffort: null }), []);
+    const base = { ...initialForm({ cwd: "/w" }), provider, name: "Scout" };
+    assert.equal("model" in createParams(base), false, "no model flag when none is chosen");
+    assert.equal(createParams({ ...base, model: "anthropic/claude-fable-5" }).model, "anthropic/claude-fable-5");
+    assert.equal("reasoningEffort" in createParams({ ...base, reasoningEffort: "high" }), false);
+    assert.equal(canCreate(base), true);
+  }
 });
