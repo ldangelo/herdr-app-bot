@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** Escapes `value` for safe interpolation inside single quotes in a POSIX sh script (handles spaces,
@@ -33,5 +33,46 @@ export function installShim(home: string, nodePath: string, mainPath: string, op
     writeFileSync(path, content, "utf8");
     chmodSync(path, 0o755);
   }
+  return path;
+}
+
+/** The shim for a compiled binary that is not itself at `<home>/bin/herdr-bot`: just run it, with the home set. */
+export function standaloneShimScript(binaryPath: string, home: string): string {
+  return `#!/bin/sh\nexport HERDR_BOT_HOME=${shQuote(home)}\nexec ${shQuote(binaryPath)} "$@"\n`;
+}
+
+/** True when both paths are the same file, seeing through symlinks (macOS temp dirs are `/var/...` -> `/private/var/...`). */
+function sameFile(a: string, b: string): boolean {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return a === b;
+  }
+}
+
+/** Only a script we wrote may be replaced: anything else at that path (a compiled binary, a user's own file) is not ours. */
+function isOurShim(content: string): boolean {
+  return content.startsWith("#!/bin/sh\nexport HERDR_BOT_HOME=");
+}
+
+/**
+ * A compiled binary installed at `<home>/bin/herdr-bot` IS the command bots call, so it must never be overwritten
+ * with a script; one living anywhere else gets a tiny shim at that path. Returns the path bots should call.
+ * Throws rather than replace a file that is not one of our shims.
+ */
+export function installStandaloneShim(home: string, binaryPath: string): string {
+  const dir = join(home, "bin");
+  const path = join(dir, "herdr-bot");
+  if (existsSync(path) && sameFile(binaryPath, path)) return path;
+  mkdirSync(dir, { recursive: true });
+  const content = standaloneShimScript(binaryPath, home);
+  if (existsSync(path)) {
+    const existing = readFileSync(path);
+    // Look at raw bytes first so a large binary is never decoded as text.
+    if (existing.length > 64 * 1024 || !isOurShim(existing.toString("utf8"))) throw new Error(`${path} exists and is not a herdr-bot shim; not replacing it`);
+    if (existing.toString("utf8") === content) return path;
+  }
+  writeFileSync(path, content, "utf8");
+  chmodSync(path, 0o755);
   return path;
 }

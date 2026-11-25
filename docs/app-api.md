@@ -199,7 +199,7 @@ applies.
 | `settings.get` | `void` | `AppSettings` |
 | `settings.update` | `Partial<AppSettings>` | `AppSettings` -- an explicit `null` clears a field; an absent key leaves it |
 | `identity.get` | `void` | `{ userName: string }` |
-| `host.status` | `void` | `HostStatusSummary { home, session, bots, rooms, runningChatIds }` |
+| `host.status` | `void` | `HostStatusSummary { version, home, session, bots, rooms, runningChatIds }` |
 
 `AppSettings = { defaultWorkingFolder: string\|null, defaultProvider: string\|null, defaultPermissionMode:
 "ask"\|"auto"\|null, terminal: "kaku"\|"wezterm"\|"ghostty"\|"iterm"\|"terminal"\|null }` -- the defaults a New

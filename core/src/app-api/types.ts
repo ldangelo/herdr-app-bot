@@ -167,6 +167,8 @@ export interface BotDefaults {
 }
 
 export interface HostStatusSummary {
+  /** The host's own version (semver): a UI that needs a minimum compares against it. */
+  readonly version: string;
   readonly home: string;
   readonly session: string;
   readonly bots: number;

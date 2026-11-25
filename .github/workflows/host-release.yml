@@ -1,0 +1,106 @@
+name: Host release
+
+# Pushing a tag like host-v1.3.0 builds the standalone herdr-bot host for each platform and publishes a GitHub release
+# named host-v1.3.0 with the binaries, their checksums and one manifest.json. That is what the herdr-app mod downloads,
+# by exact tag (see mod/herdr-bot/version.js), so these releases never compete with the desktop app's `v*.*.*` ones.
+#
+# The tag must match package.json. Run it by hand (workflow_dispatch) to build everything without publishing.
+on:
+  push:
+    tags: ["host-v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.key }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `smoke` runs the serve end-to-end tests against the binary: only possible where it can run.
+          - { os: macos-latest, key: darwin-arm64, smoke: true }
+          - { os: macos-latest, key: darwin-x64, smoke: false }
+          - { os: ubuntu-latest, key: linux-x64, smoke: true }
+          - { os: ubuntu-latest, key: linux-arm64, smoke: false }
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+
+      - name: Check that the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF_NAME#host-v}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag host-v$tag does not match package.json ($version)"
+            exit 1
+          fi
+
+      # Only the host's own dependencies (ws), not Electron and the renderer.
+      - name: Install
+        run: npm ci --ignore-scripts --workspace=@herdr-bot/core --workspace=herdr-bot --include-workspace-root
+
+      - name: Test the build tooling and the mod's logic
+        run: node --test "scripts/*.test.mjs" "mod/test/**/*.test.js" "cli/test/**/*.test.ts" core/test/version.test.ts core/test/ws-server.test.ts core/test/ws-idle-exit.test.ts
+
+      - name: Build
+        run: node scripts/build-host.mjs --target ${{ matrix.key }} --out dist/host
+
+      - name: Run the serve tests against the binary
+        if: matrix.smoke
+        run: HERDR_BOT_HOST_BIN="$PWD/dist/host/herdr-bot-${{ matrix.key }}" node --test core/test/serve-ws.test.ts
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: host-${{ matrix.key }}
+          path: dist/host/
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist/parts
+          pattern: host-*
+
+      # Re-checks every file against the checksum its own job recorded, and refuses mixed versions or duplicate platforms.
+      - name: Merge manifests
+        run: node scripts/merge-manifests.mjs --out dist/release dist/parts/host-*
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/release/* \
+            --title "herdr-bot host ${GITHUB_REF_NAME#host-v}" \
+            --notes "Standalone herdr-bot host and CLI for the herdr-app mod. The mod downloads and verifies these itself; \`manifest.json\` lists each file with its SHA-256." \
+            --verify-tag

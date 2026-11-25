@@ -1,5 +1,6 @@
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
+import { RUNTIME_KINDS, type RuntimeKind } from "./herdr/runtime.ts";
 
 export const DEFAULT_TURN_TIMEOUT_MS = 180_000;
 export const DEFAULT_BRIEF_TIMEOUT_MS = 60_000;
@@ -9,7 +10,13 @@ export const DEFAULT_HERDR_SESSION = "herdr-bot";
 
 export interface HostConfig {
   readonly home: string;
+  /** `HERDR_BOT_RUNTIME`: `herdr` (default, terminal herdr 0.9+) or `hc` (herdr-core, for herdr-app). */
+  readonly runtime: RuntimeKind;
   readonly herdrBin: string;
+  /** `HERDR_BOT_HC_BIN`: the `hc` binary the hc runtime drives. */
+  readonly hcBin: string;
+  /** `HERDR_BOT_HC_KIND_COMMANDS`: JSON `{"claude": ["/path/to/fake-agent"]}` replacing what the hc runtime launches for a provider (dev and tests). */
+  readonly hcKindCommands: Readonly<Record<string, readonly string[]>> | null;
   /** Named herdr session every herdr call targets (`herdr --session <name> …`); `default` is the main session. */
   readonly herdrSession: string;
   readonly herdrSocketPath: string;
@@ -34,6 +41,22 @@ function positiveInt(value: string | undefined, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function runtimeKind(value: string | undefined): RuntimeKind {
+  return RUNTIME_KINDS.find((kind) => kind === value) ?? "herdr";
+}
+
+function kindCommands(value: string | undefined): Readonly<Record<string, readonly string[]>> | null {
+  if (value == null || value.length === 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    const entries = Object.entries(parsed).filter((entry): entry is [string, string[]] => Array.isArray(entry[1]) && entry[1].length > 0 && entry[1].every((part) => typeof part === "string"));
+    return entries.length > 0 ? Object.fromEntries(entries) : null;
+  } catch {
+    return null;
+  }
+}
+
 function defaultUserName(): string {
   try {
     return userInfo().username;
@@ -53,7 +76,10 @@ export function resolveConfig(env: NodeJS.ProcessEnv = process.env): HostConfig 
   const herdrSession = nonEmpty(env.HERDR_BOT_SESSION) ?? DEFAULT_HERDR_SESSION;
   return {
     home,
+    runtime: runtimeKind(env.HERDR_BOT_RUNTIME),
     herdrBin: nonEmpty(env.HERDR_BIN_PATH) ?? "herdr",
+    hcBin: nonEmpty(env.HERDR_BOT_HC_BIN) ?? "hc",
+    hcKindCommands: kindCommands(env.HERDR_BOT_HC_KIND_COMMANDS),
     herdrSession,
     // Deliberately NOT `HERDR_SOCKET_PATH`: herdr injects that into every pane it manages, pointing at
     // the session the *terminal* lives in (usually `default`). An app launched from such a terminal

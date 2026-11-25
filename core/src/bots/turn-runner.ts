@@ -12,15 +12,16 @@ export interface TurnRunnerDeps {
   readonly turnTimeoutMs: number;
 }
 
-/** Typed as individual terminal key events before the bracketed-paste envelope. Claude therefore
+/** Typed as individual terminal key events before the bracketed-paste envelope. Keep it to characters that
+ * herdr-core's `hc keys` can type (letters, digits, space and ` - = [ ] \ ; ' , . /): no colon or other shifted punctuation. Claude therefore
  * sees an explicit user-authored instruction outside `<pasted_content>` and can safely act on the
  * app-generated room/DM turn that follows instead of rejecting the whole turn as prompt injection. */
-export const TURN_ENVELOPE_PREFIX = "The user sent a message in herdr-bot and explicitly asks you to handle the following pasted turn envelope now. Follow its instructions, including say/pass: ";
+export const TURN_ENVELOPE_PREFIX = "The user sent a message in herdr-bot and explicitly asks you to handle the following pasted turn envelope now. Follow its instructions, including say/pass. ";
 
 /** Same typed-prefix authorization pattern as TURN_ENVELOPE_PREFIX, but for a short mid-turn
  * addition rather than a whole new turn envelope: delivered while the bot's turn is already open, so it
  * can fold the user's new message into whatever it is about to say/pass instead of missing it entirely. */
-export const INTERRUPT_ENVELOPE_PREFIX = "The user sent a message in herdr-bot while your turn was already open; explicitly asks you to read the following pasted addition now: ";
+export const INTERRUPT_ENVELOPE_PREFIX = "The user sent a message in herdr-bot while your turn was already open; explicitly asks you to read the following pasted addition now. ";
 
 export function terminalKeys(text: string): string[] {
   return [...text].map((character) => character === " " ? "space" : character);

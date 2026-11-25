@@ -1,13 +1,17 @@
 import { log } from "../log.ts";
 import type { HerdrCli } from "./cli.ts";
 import { subscribeHerdrEvents, type HerdrSubscription } from "./socket.ts";
+import type { SubscribeEvents } from "./runtime.ts";
 import { SubscriptionRetry } from "./subscription-retry.ts";
 import type { BlockedPrompt } from "./blocked-prompt.ts";
 import { OFFLINE_RUNTIME, runtimeFromAgentInfo, type BotRuntime, type HerdrAgentInfo } from "./types.ts";
 
 export interface StatusMirrorDeps {
   readonly cli: HerdrCli;
+  /** The event endpoint handed to `subscribe` (a socket path for herdr); `null` = poll only. */
   readonly socketPath: string | null;
+  /** Live-change hint channel; defaults to herdr's socket subscription. */
+  readonly subscribe?: SubscribeEvents;
   readonly botIds: () => readonly string[];
   readonly onChange: (botId: string, runtime: BotRuntime, previous: BotRuntime) => void;
   /** Reads and parses the form a blocked bot's pane is showing (null when nothing parseable). Called on
@@ -135,7 +139,7 @@ export class StatusMirror {
     this.#subscriptionReady = false;
     const attemptedWithPanes = attemptPanes.length > 0;
     const subscriptions = [...GLOBAL_SUBSCRIPTIONS, ...attemptPanes.map((paneId) => ({ type: "pane.agent_status_changed", pane_id: paneId }))];
-    this.#subscription = subscribeHerdrEvents(this.#deps.socketPath, subscriptions, {
+    this.#subscription = (this.#deps.subscribe ?? subscribeHerdrEvents)(this.#deps.socketPath, subscriptions, {
       onEvent: () => {
         if (!current()) return;
         this.#scheduleRefresh();
